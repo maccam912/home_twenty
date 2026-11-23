@@ -1,0 +1,13 @@
+.godot/
+build/
+.DS_Store
+.env
+.env.*
+*.key
+*.keystore
+*.jks
+*.p12
+*.pfx
+.godot/editor/
+__pycache__/
+*.blend[0-9]

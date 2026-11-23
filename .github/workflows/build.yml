@@ -1,0 +1,113 @@
+name: Test and release Home Twenty
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  revisions:
+    if: ${{ !github.event.deleted }}
+    runs-on: ubuntu-24.04
+    outputs:
+      batches: ${{ steps.plan.outputs.batches }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - id: plan
+        run: python3 .github/scripts/pushed_commits.py
+
+  build:
+    needs: revisions
+    name: Check ${{ matrix.batch.label }}
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        batch: ${{ fromJSON(needs.revisions.outputs.batches) }}
+    env:
+      COMMIT_BATCH: ${{ toJSON(matrix.batch.commits) }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+          lfs: true
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/home-twenty/godot-4.7.2
+          key: ht-godot-4.7.2-linux-${{ github.event_name == 'pull_request' && 'editor' || 'templates' }}-${{ hashFiles('.github/scripts/install-godot.sh') }}
+      - uses: actions/setup-java@v4
+        if: github.event_name != 'pull_request'
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Install verified Godot release
+        run: |
+          if [[ "$GITHUB_EVENT_NAME" == pull_request ]]; then
+            bash .github/scripts/install-godot.sh
+          else
+            bash .github/scripts/install-godot.sh --export
+          fi
+      - name: Run gameplay and regression tests
+        run: python3 .github/scripts/build_commits.py test
+      - name: Install Android build tools
+        if: ${{ !cancelled() && github.event_name != 'pull_request' }}
+        run: |
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" 'platform-tools' 'platforms;android-36' 'build-tools;36.0.0'
+      - name: Export tested commits for four platforms
+        if: ${{ !cancelled() && github.event_name != 'pull_request' }}
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          GODOT_ANDROID_KEYSTORE_RELEASE_USER: ${{ secrets.ANDROID_KEY_ALIAS }}
+          GODOT_ANDROID_KEYSTORE_RELEASE_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          : "${ANDROID_KEYSTORE_BASE64:?Missing ANDROID_KEYSTORE_BASE64}"
+          : "${GODOT_ANDROID_KEYSTORE_RELEASE_USER:?Missing ANDROID_KEY_ALIAS}"
+          : "${GODOT_ANDROID_KEYSTORE_RELEASE_PASSWORD:?Missing ANDROID_KEY_PASSWORD}"
+          umask 077
+          export GODOT_ANDROID_KEYSTORE_RELEASE_PATH="$RUNNER_TEMP/home-twenty.keystore"
+          trap 'rm -f "$GODOT_ANDROID_KEYSTORE_RELEASE_PATH"' EXIT
+          printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$GODOT_ANDROID_KEYSTORE_RELEASE_PATH"
+          unset ANDROID_KEYSTORE_BASE64
+          python3 .github/scripts/build_commits.py export
+      - uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() && github.event_name != 'pull_request' && hashFiles('build/ci-releases/*/SHA256SUMS.txt') != '' }}
+        with:
+          name: release-${{ matrix.batch.label }}
+          path: build/ci-releases/
+          compression-level: 0
+          retention-days: 3
+          if-no-files-found: error
+
+  publish:
+    needs: [revisions, build]
+    if: ${{ !cancelled() && github.event_name != 'pull_request' && !github.event.deleted }}
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    strategy:
+      fail-fast: false
+      matrix:
+        batch: ${{ fromJSON(needs.revisions.outputs.batches) }}
+    # Serialize retries and simultaneous pushes for the same revision.
+    concurrency:
+      group: home-twenty-release-${{ matrix.batch.label }}
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-${{ matrix.batch.label }}
+          path: releases
+      - name: Publish verified assets by source commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bash .github/scripts/publish.sh

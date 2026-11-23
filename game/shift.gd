@@ -1,0 +1,307 @@
+extends Node3D
+
+const Driver = preload("res://vehicle/driver.gd")
+const Township = preload("res://world/township.gd")
+const PlowedSnow = preload("res://world/plowed_snow.gd")
+const Soundscape = preload("res://audio/soundscape.gd")
+const ShiftHUD = preload("res://ui/shift_hud.gd")
+const BECK_PORCH := Vector2(43,-30)
+const HOME_PORCH := Vector2(-12,38)
+const PORCH_REACH := 3.7
+const FULL_LANE := 36
+var town: Township
+var driver
+var snow
+var spray: CPUParticles3D
+var hud
+var soundscape
+var mode := "title"
+var stage := 0
+var shift_started := false
+var closing := false
+var touch_enabled := OS.has_feature("mobile") or "--touch-ui" in OS.get_cmdline_user_args()
+var title_camera := Camera3D.new()
+var drive_camera: Camera3D
+var mode_before_book := "drive"
+var message_left := 0.0
+var since_check := 0.0
+var last_revision := -1
+var mic_down := false
+var last_cut := 0.0
+var previous_mouse_mode := Input.MOUSE_MODE_VISIBLE
+
+func _ready() -> void:
+	get_tree().auto_accept_quit = false
+	process_mode = Node.PROCESS_MODE_ALWAYS
+	town = Township.new()
+	town.name = "Township"
+	add_child(town)
+	snow = PlowedSnow.new()
+	snow.name = "Snow"
+	add_child(snow)
+	spray = snow.create_spray()
+	driver = Driver.new()
+	driver.name = "Driver"
+	driver.process_mode = Node.PROCESS_MODE_PAUSABLE
+	add_child(driver)
+	soundscape = Soundscape.new()
+	soundscape.name = "Soundscape"
+	soundscape.process_mode = Node.PROCESS_MODE_PAUSABLE
+	add_child(soundscape)
+	driver.horn_used.connect(func(): soundscape.play_cue("horn"))
+	driver.cab_changed.connect(_on_cab_changed)
+	driver.blade_changed.connect(func(): soundscape.play_cue("blade_drop" if driver.blade_down else "blade_lift"))
+	driver.collapse_recovered.connect(_on_collapse)
+	var hud_layer := CanvasLayer.new()
+	add_child(hud_layer)
+	hud = ShiftHUD.new()
+	hud.touch_enabled = touch_enabled
+	hud_layer.add_child(hud)
+	hud.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	hud.menu_action.connect(_act_menu)
+	if touch_enabled:
+		get_tree().quit_on_go_back = false
+		var touch = load("res://ui/touch_controls.gd").new()
+		touch.name = "TouchControls"
+		hud_layer.add_child(touch)
+		touch.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+		touch.setup(self)
+	drive_camera = get_viewport().get_camera_3d()
+	add_child(title_camera)
+	title_camera.fov = 54
+	title_camera.position = Vector3(6.1,2.20,36.1)
+	title_camera.look_at(Vector3(2.25,1.36,45.0))
+	title_camera.make_current()
+	_show_menu("title")
+
+func _show_menu(next: String) -> void:
+	if mode=="drive":
+		previous_mouse_mode = Input.mouse_mode
+		if mic_down:
+			mic_down = false
+			hud.mic = false
+	mode = next
+	hud.mode = mode
+	hud.mouse_filter = Control.MOUSE_FILTER_IGNORE if mode=="drive" else Control.MOUSE_FILTER_STOP
+	get_tree().paused = mode!="drive"
+	Input.mouse_mode = previous_mouse_mode if mode=="drive" else Input.MOUSE_MODE_VISIBLE
+	hud.queue_redraw()
+
+func begin_shift() -> void:
+	if not shift_started:
+		shift_started = true
+		if is_instance_valid(drive_camera):
+			drive_camera.make_current()
+		say("DEB   /   CB 19","There you are, hon. The Becks need their propane. Head north on Q. At their mailbox, hang a right and open the lane to the tank.",10.5)
+	_show_menu("drive")
+
+func _act_menu(action: String) -> void:
+	match action:
+		"begin":
+			begin_shift()
+		"book":
+			mode_before_book = mode
+			_show_menu("book")
+		"close":
+			_show_menu(mode_before_book)
+
+func _input(event: InputEvent) -> void:
+	if closing or hud == null or event.is_echo():
+		return
+	if event.is_action_pressed("plat"):
+		_act_menu("close" if mode=="book" else "book")
+	elif event.is_action_pressed("pause_shift"):
+		if mode=="book":
+			_act_menu("close")
+		elif mode=="drive":
+			_show_menu("pause")
+		elif mode=="pause":
+			begin_shift()
+	elif mode!="drive":
+		if event.is_action_pressed("ui_accept"):
+			_act_menu("close" if mode=="book" else "begin")
+		else:
+			return
+	elif event.is_action_pressed("dispatch"):
+		if driver.in_cab:
+			mic_down = true
+			hud.mic = true
+			hud.subtitle = ""
+			soundscape.play_cue("radio_key")
+		else:
+			say("TRUCK RADIO","The handset is in the cab.",2.5)
+	elif event.is_action_released("dispatch") and mic_down:
+		mic_down = false
+		hud.mic = false
+		soundscape.play_cue("radio_squelch")
+		directions()
+	elif event.is_action_pressed("job"):
+		check_job()
+	else:
+		return
+	hud.queue_redraw()
+	get_viewport().set_input_as_handled()
+
+func _on_cab_changed() -> void:
+	soundscape.play_cue("door")
+	if mic_down:
+		mic_down = false
+		hud.mic = false
+	snow.stop_pass()
+
+func _on_collapse() -> void:
+	say("IN THE CAB","The door is shut. The heater is running. You remember the wind, then nothing.",8)
+
+func say(who: String, what: String, seconds: float) -> void:
+	hud.speaker = who
+	hud.subtitle = what
+	message_left = seconds
+	hud.queue_redraw()
+
+func _area(p: Vector2) -> String:
+	if p.x>4 and absf(p.y+38)<15:
+		return "BECK LANE"
+	if p.distance_to(HOME_PORCH)<12:
+		return "HOME PLACE"
+	if absf(p.x)<9:
+		return "COUNTY Q"
+	return "OPEN COUNTRY"
+
+func directions() -> void:
+	var v: Vector3 = driver.get_truck_position()
+	var p := Vector2(v.x,v.z)
+	var words: String
+	if stage>=2:
+		if p.distance_to(HOME_PORCH)<18:
+			words = "I can see your lights, hon. Park on the shoulder and come to the kitchen porch."
+		elif p.x>6 and absf(p.y+38)<20:
+			words = "Bring it back out to Q and take a left. Our place is on the west side. The kitchen light’s on."
+		elif p.y>43:
+			words = "Come north on Q. Look left for our kitchen light, just off the road."
+		else:
+			words = "Go south on Q. Our farmhouse is just off the west shoulder. Come in for coffee."
+	elif stage==1:
+		words = "The Becks’ porch is on the south side of the lane, across from their tank. Park up and give them a knock."
+	elif p.x>5 and absf(p.y+38)<9:
+		words = "That’s their lane. Lower the blade and open one truck-width all the way from the mailbox to the tank."
+	elif absf(p.x)>10:
+		words = "Look for the telephone poles on Q. The Becks’ turn is on the east side, by their mailbox."
+	elif absf(p.y+38)<9:
+		words = "You’re at their turn. The lane runs east here. Put the blade down and take it all the way to the tank."
+	elif p.y > -38:
+		words = "Take Q north past the co-op sign. Turn east at the Beck mailbox. The propane tank is at the far end."
+	else:
+		words = "You’re past them. Come south on Q, then go left at the Beck mailbox."
+	say("DEB   /   CB 19",words,8)
+
+func check_job() -> void:
+	var v: Vector3 = driver.get_driver_position()
+	var p := Vector2(v.x,v.z)
+	if driver.in_cab:
+		say("IN THE CAB","Park and get out to knock at the porch.",3)
+	elif stage==1 and p.distance_to(BECK_PORCH)<=PORCH_REACH:
+		stage = 2
+		say("MRS. BECK   /   AT THE DOOR","Oh, thank goodness. We were down to a quarter tank. Tell Deb I still have her pie plate.",8)
+	elif stage==2 and p.distance_to(HOME_PORCH)<=PORCH_REACH:
+		stage = 3
+		say("DEB   /   AT HOME","There you are. Leave your boots by the stove, hon. I kept the coffee hot.",10)
+	elif p.distance_to(BECK_PORCH)<=PORCH_REACH:
+		say("AT THE BECKS’ DOOR","You can still see the ridge from the door. The propane truck needs a clear run." if stage==0 else "Through the window, Mrs. Beck waves you on home.",5)
+	elif p.distance_to(HOME_PORCH)<=PORCH_REACH:
+		say("DEB   /   AT HOME","Coffee’s hot whenever you want it. The Becks are counting on you." if stage<3 else "Sit a little. It can snow without us for a minute.",6)
+	else:
+		say("OUTSIDE","Get close enough to reach the porch door.",2.5)
+	hud.stage = stage
+
+func update_job_progress() -> void:
+	if stage!=0 or last_revision==snow.revision:
+		return
+	last_revision = snow.revision
+	hud.opened = snow.open_length()
+	if hud.opened>=FULL_LANE:
+		stage = 1
+		hud.stage = 1
+		if not mic_down:
+			say("DEB   /   CB 19","They can get a truck in there now. Would you knock at the porch across from the tank? I’d sleep better.",9)
+			soundscape.play_cue("radio_squelch")
+
+func _physics_process(delta: float) -> void:
+	town.set_truck_pose(driver.get_truck_position(), driver.get_forward())
+	driver.set_storm_strength(town.gust_strength)
+	if mode!="drive":
+		return
+	soundscape.set_gust(town.gust_strength)
+	var blade_tip: Vector3 = driver.get_blade_position()
+	var forward: Vector3 = driver.get_forward()
+	var ahead := blade_tip + forward*.5
+	var p := Vector2(ahead.x,ahead.z)
+	var on_road: bool = snow.on_surface(p)
+	var uncut: float = 1.0-snow.clearance(p)
+	driver.snow_load = (.28 if on_road else .9)*uncut
+	if driver.in_cab and driver.blade_down and driver.speed_mps>.15:
+		driver.snow_load = (.62 if on_road else 1.0)*uncut
+		if snow.cut(blade_tip,forward):
+			last_cut = .16
+			var side := forward.cross(Vector3.UP)
+			spray.global_position = blade_tip + side*1.16 + Vector3.UP*.14
+			spray.basis = Basis.looking_at(forward)
+	else:
+		snow.stop_pass()
+	if absf(driver.speed_mps)>.12:
+		snow.press_tires(driver.get_truck_position()-forward*1.3,forward)
+	last_cut = maxf(0,last_cut-delta)
+	spray.emitting = last_cut>0
+	soundscape.update_state(driver.in_cab,driver.speed_mps,last_cut>0)
+	since_check += delta
+	if since_check >= .25:
+		since_check = 0
+		update_job_progress()
+	var player: Vector3 = driver.get_driver_position()
+	var pos := Vector2(player.x,player.z)
+	hud.area = _area(pos)
+	hud.stage = stage
+	hud.mph = roundi(absf(driver.speed_mps)*2.237)
+	hud.cab = driver.in_cab
+	hud.blade = driver.blade_down
+	hud.prompt = ""
+	if not driver.in_cab and (pos.distance_to(BECK_PORCH)<=PORCH_REACH or pos.distance_to(HOME_PORCH)<=PORCH_REACH):
+		hud.prompt = "[X]  Knock at the porch" if stage!=2 or pos.distance_to(HOME_PORCH)>PORCH_REACH else "[X]  Join Deb for coffee"
+	elif not driver.in_cab and player.distance_to(driver.get_truck_position())<4:
+		hud.prompt = "[E]  Climb into the cab"
+	elif stage==0 and driver.in_cab and not driver.blade_down and hud.area=="BECK LANE":
+		hud.prompt = "[B]  Lower the blade"
+	elif mic_down:
+		hud.prompt = "Transmitting  ·  release R to listen"
+	if touch_enabled and hud.prompt!="":
+		hud.prompt = hud.prompt.replace("[X]  ","").replace("[E]  ","").replace("[B]  ","").replace("release R to listen","release the mic to listen")
+	hud.set_cold(driver.cold)
+	if message_left>0:
+		message_left -= delta
+		if message_left<=0:
+			hud.subtitle = ""
+	hud.queue_redraw()
+
+func _notification(what:int) -> void:
+	if what==NOTIFICATION_WM_CLOSE_REQUEST and is_instance_valid(soundscape):
+		_close_game()
+	elif what==NOTIFICATION_WM_GO_BACK_REQUEST and touch_enabled and is_instance_valid(hud):
+		match mode:
+			"drive":
+				_show_menu("pause")
+			"pause":
+				begin_shift()
+			"book":
+				_act_menu("close")
+			"title":
+				_close_game()
+
+func _close_game() -> void:
+	if closing:
+		return
+	closing = true
+	mode = "closing"
+	get_tree().paused = true
+	soundscape.shutdown()
+	# Let the audio mixer release its decoded MP3 buffers before the engine exits.
+	await get_tree().create_timer(.25,true,false,true).timeout
+	get_tree().quit()
