@@ -4,7 +4,7 @@ A PS2-era winter driving game set in rural Wisconsin, 1998. This first playable 
 
 ## Downloads
 
-[GitHub Releases](https://github.com/maccam912/home_twenty/releases) has an Android APK, a universal macOS app, and x86-64 Windows and Linux builds for each tested commit. Each release is tagged with its source commit and includes SHA-256 checksums. The Android APK is signed for sideloading. The macOS build is ad-hoc signed.
+Download the [latest release](https://github.com/maccam912/home_twenty/releases/latest) for Android, macOS (Universal), Windows (x86-64), or Linux (x86-64). In the [release history](https://github.com/maccam912/home_twenty/releases), **Build 7.2** means the second commit in workflow run 7. The highest build number is marked **Latest**. Each release is tagged with its source commit and includes SHA-256 checksums. The Android APK is signed for sideloading. The macOS build is ad-hoc signed.
 
 ## Play
 
@@ -56,4 +56,4 @@ Install Git LFS before cloning so Git downloads the models, textures, fonts and 
 
 Run `python3 tools/run_tests.py` from the repository with Godot 4.7.2 and Python 3 on your path. Set `GODOT_BIN` to use a specific engine executable. The suite includes an entire delivery and return driven through the normal input system. The tests run offline with the bundled audio.
 
-GitHub Actions runs tests for pull requests and each commit pushed to a branch. Before publishing a commit as a prerelease, Actions starts the packaged game on Linux, Windows, and macOS and verifies the Android APK signature and manifest. Android release signing uses the repository secrets `ANDROID_KEYSTORE_BASE64`, `ANDROID_KEY_ALIAS` and `ANDROID_KEY_PASSWORD`.
+GitHub Actions runs tests for pull requests and each commit pushed to a branch. Before publishing a full release, Actions starts the packaged game on Linux, Windows, and macOS and verifies the Android APK signature and manifest. Android release signing uses the repository secrets `ANDROID_KEYSTORE_BASE64`, `ANDROID_KEY_ALIAS` and `ANDROID_KEY_PASSWORD`.

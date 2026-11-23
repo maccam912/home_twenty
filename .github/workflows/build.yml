@@ -144,4 +144,24 @@ jobs:
       - name: Publish verified assets by source commit
         env:
           GH_TOKEN: ${{ github.token }}
+          COMMIT_BATCH: ${{ toJSON(matrix.batch.commits) }}
         run: bash .github/scripts/publish.sh
+
+  latest:
+    needs: publish
+    if: ${{ !cancelled() && needs.publish.result != 'skipped' }}
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    # Each job considers every published build, so one pending refresh is enough.
+    concurrency:
+      group: home-twenty-latest-release
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Mark the highest published build as Latest
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bash .github/scripts/update-latest.sh

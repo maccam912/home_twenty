@@ -12,18 +12,19 @@ for directory in releases/*; do
             continue 2
         fi
     done
+    index=$(jq -er --arg sha "$commit" '.[] | select(.sha == $sha) | .index' <<< "$COMMIT_BATCH")
+    title="Home Twenty · Build $GITHUB_RUN_NUMBER.$((index + 1))"
     tag="build-$commit"
-    # The tag is a full commit ID. Re-running a published build is a no-op.
+    # Keep one release per source commit, including on a later workflow dispatch.
     if draft=$(gh release view "$tag" --json isDraft --jq .isDraft); then
         if [[ "$draft" == false ]]; then
             continue
         fi
     else
-        gh release create "$tag" --target "$commit" --draft --prerelease \
-            --title "Home Twenty · ${commit:0:12}" \
+        gh release create "$tag" --target "$commit" --draft --title "$title" \
             --notes "Playable builds of commit \`$commit\` for Android (ARM), Linux and Windows (x86-64), and macOS (Universal)."
     fi
     gh release upload "$tag" "$directory"/* --clobber
-    gh release edit "$tag" --draft=false --prerelease
+    gh release edit "$tag" --title "$title" --draft=false --prerelease=false --latest=false
 done
 exit "$failed"
