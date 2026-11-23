@@ -32,12 +32,12 @@ void fragment() {
 	float edging = smoothstep(0.,.09,UV.y)*(1.-smoothstep(.79,1.,UV.y));
 	float mask = edging * boundary * vertical * smoothstep(.25,.74,eddy*.74+grains*.26)*breathing;
 	vec2 illumination = powder_light(at);
-	vec3 mist = mix(vec3(.38,.45,.49), vec3(.76,.72,.62), illumination.x);
+	vec3 mist = mix(vec3(.38,.45,.49), vec3(.98,.94,.83), illumination.x);
 	ALBEDO = mix(mist, vec3(.86,.63,.40), illumination.y*.66);
 	vec3 eye = CAMERA_POSITION_WORLD - at;
 	float incidence = abs(dot(normalize(eye),sheet_normal));
 	float eye_distance = length(eye);
 	float reveal = smoothstep(.13,.52,incidence)*smoothstep(1.1,4.,eye_distance);
 	reveal *= 1. - smoothstep(52.,76.,eye_distance);
-	ALPHA = reveal*mask*(.15+.44*gust+.18*max(illumination.x,illumination.y));
+	ALPHA = reveal * mask * min(.91, .13 + .36 * gust + .48 * max(illumination.x, illumination.y));
 }

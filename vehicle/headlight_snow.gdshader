@@ -15,7 +15,7 @@ void vertex() {
 
 void fragment() {
 	vec3 ray = normalize(back_face - eye);
-	const vec3 half_extent = vec3(6.8,1.9,10.0);
+	const vec3 half_extent = vec3(8.5,2.5,14.0);
 	vec3 inv_ray = 1.0 / (ray + vec3(0.000001));
 	vec3 near_sides = min((-half_extent-eye) * inv_ray,(half_extent-eye) * inv_ray);
 	float near_t = max(0.0,max(near_sides.x,max(near_sides.y,near_sides.z)));
@@ -25,15 +25,23 @@ void fragment() {
 	float step_length = max(far_t-near_t,0.0)/8.0;
 	if (step_length < 0.0001) { discard; }
 	float scatter = 0.0;
+	vec3 first_sample = eye + ray * (near_t + .5 * step_length);
+	vec3 world_start = (MODEL_MATRIX * vec4(first_sample, 1.)).xyz;
+	vec3 world_step = mat3(MODEL_MATRIX) * (ray * step_length);
 	for (int i=0;i<8;i++) {
-		vec3 sample_pos = eye + ray*(near_t+(float(i)+0.5)*step_length);
-		float reach = 10.0-sample_pos.z;
-		float side = (abs(sample_pos.x)-.67)/(0.43+.24*reach);
-		float above = (sample_pos.y-.20+.075*reach)/(.24+.088*reach);
+		vec3 sample_pos = first_sample + ray * (float(i) * step_length);
+		float reach = half_extent.z - sample_pos.z;
+		float side = (abs(sample_pos.x) - .66 - .052 * reach) / (.40 + .27 * reach);
+		float above = (sample_pos.y + .079 * reach) / (.27 + .12 * reach);
 		float lobe = exp(-1.8*(side*side+above*above));
-		float sheet = .82+.18*sin(sample_pos.x*.65+sample_pos.z*.37-TIME*2.3);
-		scatter += lobe * sheet * (1.0-smoothstep(4.0,19.0,reach)) * step_length;
+		// Strands of powder travel across the field even when the truck turns.
+		vec3 world = world_start + float(i) * world_step;
+		float downwind = dot(world.xz, vec2(.96, .28)) - TIME * 8.0;
+		float roll = sin(downwind * .63 + world.y * 2.4 + sin(world.z * .85));
+		float folds = sin(downwind * 1.2 - world.z * .34 + world.y * 4.5);
+		float density = .26 + .74 * smoothstep(-.4, .85, roll * .7 + folds * .3);
+		scatter += lobe * density * (1.0 - smoothstep(7., 27., reach)) * step_length;
 	}
-	ALBEDO = vec3(.88,.83,.68);
-	ALPHA = min(scatter*mix(.009,.018,gust),.16);
+	ALBEDO = vec3(.97,.94,.84);
+	ALPHA = min(scatter * mix(.018,.058,gust), .36);
 }

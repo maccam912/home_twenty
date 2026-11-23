@@ -68,8 +68,57 @@ func _run() -> void:
 	check(shift.hud.subtitle == shift._onsite_instruction(), "Deb switches to field instructions on arrival")
 	await _test_shoulder_crossing()
 	await _test_fast_runoff()
+	await _test_payphone()
 	print("Shift rules: outdoor handoffs, loading bay, cold, radio directions, ditch crossing and powered recovery; failures: ",failures)
 	await _finish()
+
+
+func _test_payphone() -> void:
+	var driver = shift.driver
+	shift.dispatch = preload("res://game/dispatch.gd").new(1998)
+	shift.dispatch.start_shift()
+	for stop in 20:
+		if shift.dispatch.job.kind == "story":
+			break
+		shift.dispatch.finish_stop()
+	var order: Dictionary = shift.dispatch.job
+	check(order.kind == "story" and order.site == "station", "The first priority slip calls the driver to Pike's payphone")
+	if order.kind != "story":
+		return
+	shift._dispatch_changed()
+	check(shift.phone_bell.playing and shift.phone_bell.stream.loop, "The outside phone rings from its canopy while the slip is open")
+	driver.speed_mps = 0
+	driver._truck.global_position = Vector3(Route.PHONE.x, 0, Route.PHONE.y - 4)
+	shift.directions()
+	check(shift.hud.subtitle == order.instruction, "Ask Deb identifies the payphone on arrival")
+	await _tap(KEY_E)
+	var bell: Vector2 = Route.SITES.station.stop
+	driver._walker.global_position = Vector3(bell.x, 0, bell.y)
+	check(shift.field_action_label().is_empty(), "Pike's regular service bell cannot answer the payphone")
+	driver._walker.global_position = Vector3(Route.PHONE.x, 0, Route.PHONE.y - 1)
+	check(shift.field_action_label() == order.action, "Approaching the physical receiver offers the phone action")
+	await _tap(KEY_X)
+	check(shift.hud.speaker == "PAYPHONE" and not shift.phone_bell.playing, "Lifting the receiver quiets the bell and reveals the caller")
+	check(shift.dispatch.job.kind != "story" and shift.dispatch.job.brief.begins_with(order.followup), "Deb follows up from the cab and gets back to local work")
+	for stop in 50:
+		if shift.dispatch.job.kind == "story":
+			break
+		shift.dispatch.finish_stop()
+	order = shift.dispatch.job
+	check(order.kind == "story" and order.site == "bell", "A later priority slip leads to the noticeboard")
+	if order.kind == "story":
+		shift._dispatch_changed()
+		driver._walker.global_position = Vector3(Route.NOTICE.x, 0, Route.NOTICE.y - 1)
+		check(shift.field_action_label() == order.action, "The route sheet has its own reachable field action")
+		await _tap(KEY_X)
+		for frame in 32:
+			await physics_frame
+		check(shift.hud.subtitle.contains("1958") and shift.town.bus_route_clip.rotation.z > 1.25,
+				"Lifting the route sheet exposes the 1958 stop on the physical noticeboard")
+	for item in ["cells", "apples", "kindling"]:
+		driver.set_cargo(item)
+		var prop: Node3D = driver._model._cargo
+		check(prop != null and prop.get_child_count() > 1, "The new errand loads visible cargo for " + item)
 
 
 func _test_shoulder_crossing() -> void:

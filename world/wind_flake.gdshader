@@ -9,19 +9,21 @@ void vertex() {
 	vec3 world_center = MODEL_MATRIX[3].xyz;
 	vec3 eye = (VIEW_MATRIX * vec4(world_center, 1.)).xyz;
 	float size = length(MODEL_MATRIX[0].xyz);
-	vec3 velocity = vec3(8. + gust * 5., -1.95, 2.3);
+	vec3 velocity = vec3(9. + gust * 5., -2.2, 2.6);
 	vec2 streak = (VIEW_MATRIX * vec4(velocity, 0.)).xy;
 	float projected = length(streak);
 	vec2 along = streak / max(projected, 0.001);
 	vec2 across = vec2(-along.y, along.x);
-	vec2 drift = VERTEX.y * along * (0.30 + 0.11 * projected);
-	VERTEX.xy = size * (VERTEX.x * across + drift);
-	MODELVIEW_MATRIX = mat4(vec4(1.,0.,0.,0.),vec4(0.,1.,0.,0.),vec4(0.,0.,1.,0.),vec4(eye,1.));
 	vec2 light = powder_light(world_center);
+	// Fast, near-horizontal grains catch the lamps for a few metres of their flight.
+	float exposure = .10 + light.x * .15;
+	vec2 drift = VERTEX.y * along * (.40 + exposure * projected);
+	VERTEX.xy = size * (VERTEX.x * across * (1. + .28 * light.x) + drift);
+	MODELVIEW_MATRIX = mat4(vec4(1.,0.,0.,0.),vec4(0.,1.,0.,0.),vec4(0.,0.,1.,0.),vec4(eye,1.));
 	float brightness = max(light.x, light.y);
-	flake_color = mix(vec3(.44,.51,.56), vec3(.91,.88,.75), light.x);
+	flake_color = mix(vec3(.44,.51,.56), vec3(1.0,.97,.86), light.x);
 	flake_color = mix(flake_color, vec3(1.,.73,.43), light.y*.8);
-	opacity = smoothstep(.8, 2.6, -eye.z) * (.27 + .20*gust + brightness*.48);
+	opacity = smoothstep(.8, 2.6, -eye.z) * min(1., .23 + .18*gust + brightness*.76);
 	// Keep flakes out of the pickup, even with the camera looking back through the windshield.
 	vec3 offset = world_center - truck_position;
 	float local_x = dot(offset.xz, vec2(-truck_forward.z, truck_forward.x));

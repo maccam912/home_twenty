@@ -6,6 +6,7 @@ const PlowedSnow = preload("res://world/plowed_snow.gd")
 const Soundscape = preload("res://audio/soundscape.gd")
 const ShiftHUD = preload("res://ui/shift_hud.gd")
 const LoadingBay = preload("res://world/loading_bay.gd")
+const RoadsideEncounters = preload("res://world/roadside_encounters.gd")
 const Dispatch = preload("res://game/dispatch.gd")
 const Route = preload("res://world/route.gd")
 const STOP_REACH := 3.7
@@ -20,8 +21,10 @@ var mode := "title"
 var shift_started := false
 var closing := false
 var dispatch := Dispatch.new()
+var encounters := RoadsideEncounters.new()
 var pending_order_call := false
 var pending_route_call := false
+var phone_bell := AudioStreamPlayer3D.new()
 var loading_bays: Dictionary[String, LoadingBay] = {}
 var last_bay_revision := -1
 var touch_enabled := OS.has_feature("mobile") or "--touch-ui" in OS.get_cmdline_user_args()
@@ -43,6 +46,8 @@ func _ready() -> void:
 	town = Township.new()
 	town.name = "Township"
 	add_child(town)
+	encounters.name = "RoadsideEncounters"
+	add_child(encounters)
 	snow = PlowedSnow.new()
 	snow.name = "Snow"
 	add_child(snow)
@@ -56,6 +61,14 @@ func _ready() -> void:
 	soundscape = Soundscape.new()
 	soundscape.name = "Soundscape"
 	add_child(soundscape)
+	phone_bell.name = "PikePayphone"
+	phone_bell.stream = preload("res://audio/generated/payphone.mp3")
+	phone_bell.position = Vector3(Route.PHONE.x, 1.45, Route.PHONE.y)
+	phone_bell.unit_size = 9.0
+	phone_bell.max_distance = 72.0
+	phone_bell.volume_db = -5.0
+	phone_bell.process_mode = Node.PROCESS_MODE_PAUSABLE
+	add_child(phone_bell)
 	driver.horn_used.connect(func(): soundscape.play_cue("horn"))
 	driver.cab_changed.connect(_on_cab_changed)
 	driver.blade_changed.connect(func(): soundscape.play_cue("blade_drop" if driver.blade_down else "blade_lift"))
@@ -110,7 +123,8 @@ func begin_shift() -> void:
 		soundscape.start_truck()
 		if is_instance_valid(drive_camera):
 			drive_camera.make_current()
-		dispatch.start_shift()
+		var truck: Vector3 = driver.get_truck_position()
+		dispatch.start_shift(Vector2(truck.x, truck.z))
 		_dispatch_changed()
 		_call_order()
 
@@ -206,7 +220,7 @@ func _onsite_instruction() -> String:
 func _at_stop(p: Vector2) -> bool:
 	if dispatch.job.is_empty():
 		return false
-	var stop: Vector2 = Route.SITES[dispatch.job.site].stop
+	var stop := Dispatch.stop_for(dispatch.job)
 	return p.distance_squared_to(stop) <= STOP_REACH * STOP_REACH
 
 func field_action_label() -> String:
@@ -215,7 +229,7 @@ func field_action_label() -> String:
 	var v: Vector3 = driver.get_driver_position()
 	if _at_stop(Vector2(v.x, v.z)):
 		return dispatch.job.action
-	return ""
+	return encounters.action_at(Vector2(v.x, v.z))
 
 func check_job() -> void:
 	if driver.in_cab:
@@ -223,18 +237,28 @@ func check_job() -> void:
 		return
 	var v: Vector3 = driver.get_driver_position()
 	if not _at_stop(Vector2(v.x, v.z)):
-		say("OUTSIDE", "Your stop is marked on Deb's slip in the plat book.", 3)
+		var observation := encounters.investigate_at(Vector2(v.x, v.z))
+		if observation.is_empty():
+			say("OUTSIDE", "Your stop is marked on Deb's slip in the plat book.", 3)
+		else:
+			say("OUTSIDE", observation, maxf(6.0, observation.length() / 17.0))
 		return
 	update_job_progress()
 	if hud.opened < hud.target_length:
 		say("AT THE TURNOUT", _onsite_instruction(), 6)
 		return
-	var response := dispatch.finish_stop()
-	say(response.speaker, response.text, 6.0)
+	if dispatch.job.get("stop") == Route.NOTICE:
+		town.uncover_bus_route()
+	var response := dispatch.finish_stop(Vector2(v.x, v.z))
+	say(response.speaker, response.text, maxf(6.0, response.text.length() / 17.0))
 	_dispatch_changed()
 
 func _dispatch_changed() -> void:
 	var order := dispatch.job
+	if order.get("stop") == Route.PHONE:
+		phone_bell.play()
+	else:
+		phone_bell.stop()
 	driver.set_cargo(order.get("cargo", ""))
 	hud.completed_jobs = dispatch.completed
 	hud.work_order = order
@@ -320,6 +344,7 @@ func _physics_process(delta: float) -> void:
 		update_job_progress()
 	var player: Vector3 = driver.get_driver_position()
 	var pos := Vector2(player.x,player.z)
+	encounters.update_sightings(delta, pos)
 	hud.area = Route.area_at(pos)
 	hud.mph = roundi(absf(driver.speed_mps)*2.237)
 	hud.low_grip = driver.speed_mps > Driver.GRIP_LIMIT
@@ -373,6 +398,8 @@ func _close_game() -> void:
 	closing = true
 	mode = "closing"
 	get_tree().paused = true
+	phone_bell.stop()
+	phone_bell.stream = null
 	soundscape.shutdown()
 	# Let the audio mixer release its decoded MP3 buffers before the engine exits.
 	await get_tree().create_timer(.25,true,false,true).timeout

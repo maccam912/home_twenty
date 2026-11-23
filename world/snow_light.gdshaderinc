@@ -9,12 +9,12 @@ vec2 powder_light(vec3 p) {
 	vec3 delta = p - truck_position;
 	float ahead = dot(delta, truck_forward);
 	float across = dot(delta, cross(truck_forward, truck_up));
-	float cone = max(0., ahead - 2.5);
-	float spread = 1.05 + cone * .30;
-	float side = 1. - smoothstep(spread * .55, spread, abs(across));
-	float height = abs(dot(delta, truck_up) - (1.38 - .05 * cone));
-	float depth = smoothstep(2.4, 4.0, ahead) * (1. - smoothstep(7., 21., ahead));
-	float beam = side * depth * (1. - smoothstep(.65, 1.0 + .1 * cone, height));
+	float reach = max(0., ahead - 2.86);
+	// Paired plow lamps, aimed a little down and out from the top of the blade.
+	float side = (abs(across) - .66 - .052 * reach) / (.43 + .36 * reach);
+	float height = (dot(delta, truck_up) - 1.53 + .079 * reach) / (.34 + .16 * reach);
+	float depth = smoothstep(2.80, 3.65, ahead) * (1. - smoothstep(12., 36., reach));
+	float beam = (1. - smoothstep(.34, 1.2, length(vec2(side, height)))) * depth;
 	float lamp = 0.;
 	for (int i = 0; i < yard_lamps.length(); i++) {
 		vec3 diff = p - yard_lamps[i];

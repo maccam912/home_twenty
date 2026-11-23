@@ -19,12 +19,15 @@ var mound := SphereMesh.new()
 var gable: ArrayMesh
 var drift_forms: Array[ArrayMesh] = []
 var tree_meshes: Dictionary[StringName, Mesh] = {}
+var bus_route_clip := Node3D.new()
 var trunk_cells: Dictionary[Vector2i, StaticBody3D] = {}
 var trunk_shape := BoxShape3D.new()
 var mats := {}
 var batches := {}
 var snowfall: CPUParticles3D
 var weather_camera: Camera3D
+var last_weather_eye := Vector3.ZERO
+var weather_velocity := Vector3.ZERO
 var gust_strength := 0.0
 var storm_seconds := 0.0
 var ground_snow: Node3D
@@ -71,7 +74,7 @@ func _ready() -> void:
 	_snowfield()
 	_buildings()
 	_road_furniture()
-	_feed_sign()
+	_business_signs()
 	_outer_roads()
 	_contract_yards()
 	Backroads.new(self).build()
@@ -164,8 +167,8 @@ func _light_and_weather() -> void:
 	snowfall.preprocess = snowfall.lifetime
 	snowfall.local_coords = false
 	snowfall.emission_shape = CPUParticles3D.EMISSION_SHAPE_BOX
-	snowfall.emission_box_extents = Vector3(14,5.2,17)
-	snowfall.direction = Vector3(1.,-.39,.26).normalized()
+	snowfall.emission_box_extents = Vector3(14,3.4,17)
+	snowfall.direction = Vector3(1.,-.25,.28).normalized()
 	snowfall.spread = 12.
 	snowfall.gravity = Vector3(.90,-.14,.18)
 	snowfall.initial_velocity_min = 6.5
@@ -258,10 +261,18 @@ func _process(delta: float) -> void:
 	if camera:
 		var eye := camera.global_position
 		_follow_ground_snow(Vector2(eye.x, eye.z))
-		snowfall.global_position = camera.global_position + Vector3(-10, 4.2, -2.6) - camera.global_basis.z*6.
-		if weather_camera != camera:
+		var travel := eye - last_weather_eye
+		if weather_camera != camera or travel.length_squared() > 25.:
+			weather_velocity = Vector3.ZERO
 			snowfall.restart()
 			weather_camera = camera
+		elif delta > 0.:
+			# Snow stays in world space after emission. Seed it ahead so the
+			# driver still passes through flakes at highway speed.
+			var velocity := Vector3(travel.x, 0., travel.z) / delta
+			weather_velocity = weather_velocity.lerp(velocity, 1. - exp(-delta * 3.))
+		last_weather_eye = eye
+		snowfall.global_position = eye + Vector3(-11, 2.1, -3.1) - camera.global_basis.z * 8.5 + weather_velocity
 
 func _snowfield() -> void:
 	var ground := Roadside.new()
@@ -497,26 +508,53 @@ func _road_furniture() -> void:
 	_fence(Vector3(171,0,Route.BECK_Z-18),Vector3(171,0,Route.BECK_Z-28),4.6)
 	_fence(Vector3(39,0,Route.COOP_Z-55),Vector3(109,0,Route.COOP_Z-55),4.7)
 
-func _feed_sign() -> void:
-	var mount := Transform3D(Basis(Vector3.UP,-.32),Vector3(9.3,0,Route.COOP_Z))
-	for x:float in [-1.4,1.4]:
+func _business_signs() -> void:
+	var coop := Transform3D(Basis(Vector3.UP,-.32),Vector3(9.3,0,Route.COOP_Z))
+	_painted_board("Feed co-op", coop, Vector2(3.95,1.83), 2.36, preload("res://world/art/feed_coop.webp"), false)
+	for id: String in Route.Survey.BUSINESS_SIGNS:
+		var site: Dictionary = Route.SITES[id]
+		var board: Dictionary = Route.Survey.BUSINESS_SIGNS[id]
+		var inward: Vector2 = site.mouth.direction_to(site.yard)
+		var along := inward.orthogonal()
+		# Set the large board back from the ditch and clear of the private lane.
+		var point: Vector2 = site.mouth + inward * 9.4 - along * 13.0
+		var yaw := atan2(along.x, along.y) + .08
+		var mount := Transform3D(Basis(Vector3.UP, yaw), Vector3(point.x,0,point.y))
+		var steel := id in ["station", "reese", "dahl"]
+		_painted_board(site.name, mount, Vector2(board.width,board.width * .5), 2.82 if steel else 2.24, board.art, steel)
+
+func _painted_board(title: String, mount: Transform3D, size: Vector2, center: float, art: Texture2D, steel: bool) -> void:
+	var material := "galv" if steel else "creosote"
+	var offsets := [0.0] if steel else [-size.x * .35, size.x * .35]
+	var top := center - size.y * .5
+	for x: float in offsets:
 		var foot := mount * Vector3(x, 0, 0)
 		var grade := Roadside.height_at(foot.x, foot.z)
-		_local(mount,Vector3(x,(2.74+grade)*.5,0),Vector3(.19,2.74-grade,.19),"creosote")
-		_block("Co-op signpost",mount*Vector3(x,(1.8+grade)*.5,0),Vector3(.2,1.8-grade,.2))
-	_local(mount,Vector3(0,2.36,.04),Vector3(3.95,1.83,.15),"wood")
-	_local(mount,Vector3(0,3.30,.05),Vector3(4.03,.12,.24),"snow")
+		var post := Vector3(x,(top+grade)*.5,0)
+		var thickness := .27 if steel else .19
+		var dims := Vector3(thickness,top-grade,thickness)
+		_local(mount,post,dims,material)
+		_block(title + " signpost", mount * post, dims, mount.basis.get_euler().y)
+	var board := mount.translated_local(Vector3.UP * center)
+	_local(board, Vector3.ZERO, Vector3(size.x,size.y,.17), "metal" if steel else "wood")
+	_block(title + " board", board.origin, Vector3(size.x,size.y,.17), board.basis.get_euler().y)
+	_local(board, Vector3(0,size.y*.5+.035,0), Vector3(size.x+.06,.075,.25), "snow")
 	var mat := StandardMaterial3D.new()
-	mat.albedo_texture = load("res://world/art/feed_coop.webp")
-	mat.texture_filter = BaseMaterial3D.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS
+	mat.albedo_texture = art
+	mat.texture_filter = BaseMaterial3D.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS_ANISOTROPIC
 	mat.roughness = 1.0
-	var face := MeshInstance3D.new()
 	var panel := QuadMesh.new()
-	panel.size = Vector2(3.91,1.8)
-	face.mesh = panel
-	face.material_override = mat
-	face.transform = mount.translated_local(Vector3(0,2.37,.119))
-	add_child(face)
+	panel.size = size - Vector2(.04,.04)
+	panel.material = mat
+	# Each approach gets right-reading letters on its own side of the board.
+	for side: float in [0.0, PI]:
+		var face := MeshInstance3D.new()
+		face.name = title + " painted face"
+		face.mesh = panel
+		face.transform = board.rotated_local(Vector3.UP,side).translated_local(Vector3(0,0,.092))
+		face.visibility_range_end = 240
+		face.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		add_child(face)
 
 
 # Sparse marker pairs and dated green blades make the new roads readable
@@ -725,9 +763,22 @@ func _service_station() -> void:
 	_block("Telephone",phone+Vector3.UP*.87,Vector3(.64,1.74,.47))
 	_box(phone+Vector3.UP*1.47,Vector3(.65,.83,.32),"green")
 	_box(phone+Vector3(0,1.47,-.19),Vector3(.33,.44,.08),"galv")
+	_box(phone+Vector3(.026,1.623,-.236),Vector3(.195,.071,.014),"trim")
+	_box(phone+Vector3(.026,1.625,-.246),Vector3(.141,.016,.006),"black")
+	_box(phone+Vector3(.031,1.456,-.239),Vector3(.172,.192,.02),"wire")
+	for row in 4:
+		for col in 3:
+			var key := phone + Vector3(-.025+col*.055,1.522-row*.045,-.254)
+			_box(key,Vector3(.037,.029,.012),"trim")
+	_box(phone+Vector3(.031,1.288,-.235),Vector3(.136,.047,.023),"black")
 	_box(phone+Vector3(-.19,1.46,-.25),Vector3(.09,.33,.09),"black")
 	for y: float in [1.30,1.61]:
 		_box(phone+Vector3(-.18,y,-.25),Vector3(.16,.11,.17),"black")
+	var cord := PackedVector3Array([Vector3(-.19,1.26,-.27),Vector3(-.204,1.03,-.289),
+			Vector3(-.174,.901,-.274),Vector3(-.128,.881,-.25),Vector3(-.087,.926,-.227),
+			Vector3(-.076,1.209,-.186)])
+	for i in range(1, cord.size()):
+		_beam(phone+cord[i-1],phone+cord[i],.017,"wire")
 	_box(phone+Vector3(0,1.93,-.15),Vector3(.82,.16,.77),"green")
 	for side: int in [-1,1]:
 		_box(phone+Vector3(side*.36,1.70,-.13),Vector3(.08,.42,.70),"green")
@@ -806,10 +857,37 @@ func _school_turn() -> void:
 		_box(board+Vector3(x,.99,0),Vector3(.12,1.98,.14),"wood")
 	_box(board+Vector3.UP*1.65,Vector3(1.56,1.0,.20),"green")
 	_box(board+Vector3(0,1.65,-.116),Vector3(1.38,.81,.04),"glass")
-	for x: float in [-.37,.15,.46]:
+	for x: float in [.15,.46]:
 		_box(board+Vector3(x,1.68,-.15),Vector3(.28,.39,.025),"trim",Vector3(0,0,x*.11))
+	var route_paper := StandardMaterial3D.new()
+	route_paper.albedo_color = Color("#d9c8a1")
+	route_paper.emission_enabled = true
+	route_paper.emission = Color("#a99872")
+	route_paper.emission_energy_multiplier = .23
+	mats["route_paper"] = route_paper
+	_box(board+Vector3(-.36,1.67,-.15),Vector3(.45,.41,.018),"route_paper")
+	var old_route := _letter("PINERY RD.\nONE CHILD\nDEC. 1958",board+Vector3(-.36,1.67,-.162),PI,.00175)
+	old_route.modulate = Color("#2e2721")
+	# The ordinary bus sheet is held by one thumbtack. It stays pinned aside
+	# after the driver finds the earlier route underneath.
+	add_child(bus_route_clip)
+	bus_route_clip.position = board+Vector3(-.15,1.86,-.184)
+	var sheet := MeshInstance3D.new()
+	sheet.mesh = cube
+	sheet.scale = Vector3(.46,.42,.01)
+	sheet.position = Vector3(-.21,-.19,0)
+	sheet.material_override = route_paper
+	bus_route_clip.add_child(sheet)
+	var current_route := _letter("ROUTE 4\nMILL RD.\nLINE RD.",board+Vector3(-.36,1.67,-.198),PI,.00175)
+	current_route.modulate = Color("#38423c")
+	current_route.reparent(bus_route_clip)
+	_box(bus_route_clip.position-Vector3(0,0,.014),Vector3(.034,.034,.013),"dark_red")
 	_box(board+Vector3.UP*2.21,Vector3(1.73,.12,.42),"snow")
 	_letter("DISTRICT 4",board+Vector3(0,2.02,-.16),PI,.0036)
+
+func uncover_bus_route() -> void:
+	create_tween().set_pause_mode(Tween.TWEEN_PAUSE_STOP).tween_property(
+			bus_route_clip, "rotation:z", 1.72, .45).set_trans(Tween.TRANS_SINE)
 
 func _gravel_pit() -> void:
 	var hopper := Vector3(96,0,-2121)
@@ -1097,7 +1175,7 @@ func _gable_mesh() -> ArrayMesh:
 			st.add_vertex(v)
 	return st.commit()
 
-func _letter(value: String, at: Vector3, angle: float, pixel: float) -> void:
+func _letter(value: String, at: Vector3, angle: float, pixel: float) -> Label3D:
 	var label := Label3D.new()
 	label.text = value
 	label.font_size = 32
@@ -1109,6 +1187,7 @@ func _letter(value: String, at: Vector3, angle: float, pixel: float) -> void:
 	label.double_sided = false
 	label.visibility_range_end = 125.0
 	add_child(label)
+	return label
 
 func _lamp(at: Vector3, reach: float) -> void:
 	var lamp := OmniLight3D.new()

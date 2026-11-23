@@ -4,7 +4,7 @@ extends SceneTree
 
 const Route = preload("res://world/route.gd")
 # A reproducible draw from the same deck used by live shifts: Beck lane, then mill slips.
-const ROUTE_SEED := 221
+const ROUTE_SEED := 142
 
 var shift
 var failures := 0

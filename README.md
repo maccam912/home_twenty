@@ -21,13 +21,17 @@ To play from source, open the project in Godot 4.7 and press F6 on `game/shift.t
 | E | Stop and step outside, or get back in beside the truck. |
 | H | Sound the truck horn. |
 | Hold R, then release | Transmit on the cab CB, then listen for Deb’s directions. |
-| X | Use the marked outdoor fixture on foot to check in, load, deliver or sign off. |
+| X | Use the outdoor fixture on Deb’s slip, or investigate something you’ve pulled over to look at. On touchscreens the button names the action when you’re within reach. |
 | M / Tab | Open or close the plat book. Press V or tap the paper tab to turn from the county index to the local sheet and the assigned yard. Arrow keys browse sheets. You can also tap a square on the index. |
 | Esc | Pause or resume. |
 
 The township is about eight miles square (12.8 km on a side). County Q crosses it north to south and County H crosses it west to east. A straight crossing takes about 9 minutes 35 seconds at full throttle, or 13 minutes 38 seconds at a steady 35 mph. The seven original properties cluster around the Q section. The outer roads pass sugar camps, timber landings, town halls, orchards and isolated farmyards. Spruce woodlots and birch stands break up the rolling fields.
 
-Deb usually has work in the vicinity of your last stop. She gives turns, distances and landmarks over the CB. Your paper atlas has 16 section sheets and a close-up of the assigned yard. Use it to find the handoff point, then climb back into the cab for the next call.
+Deb picks the next job by driving distance from where you are. She checks both legs of a supply run before she puts it on your slip. You might haul kindling, check a neighbor’s stove or open a dairy lane for the milk truck. As you work more properties, an occasional call takes priority. Deb waits until you’ve finished your current slip.
+
+Ask Deb for turns, distances and landmarks over the CB. Watch for the hand-painted boards at business entrances. The winged spark plug marks Pike Service, and a Holstein on green marks Kroll Dairy. Your paper atlas has 16 section sheets and a close-up of the assigned yard. Use it to find the handoff point, then climb back into the cab for the next call.
+
+You can pull over between jobs. Look for a pair of red taillights in the ditch on County Q north of your home lane. Park, step out, and walk up to the window. Your work slip stays with you while you investigate.
 
 An approach job needs a continuous blade-width opening from the public road to the yard. For a loading-bay call, push the new pile between the orange stakes. Those piles can turn up again after a loader or tractor has been through. Previously opened approaches and wheel tracks stay put. Supply runs have a pickup and a delivery, and some neighbors just need you to stop and check a reading or collect a slip.
 
@@ -50,7 +54,7 @@ chmod 600 ~/.config/home-twenty/elevenlabs.key
 List cues with `python3 tools/generate_sfx.py --list`. To generate the sounds used in this shift, run:
 
 ```sh
-python3 tools/generate_sfx.py wind crosswind heater engine ignition plat_fold plow radio_key radio_squelch horn door blade_lift blade_drop
+python3 tools/generate_sfx.py wind crosswind heater engine ignition plat_fold plow radio_key radio_squelch horn door blade_lift blade_drop payphone
 ```
 
 Generated MP3s go to `audio/generated/`. Restart the project to load new sounds. To include new sounds in the standalone app, reimport the assets and export the macOS and Android presets again.

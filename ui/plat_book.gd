@@ -204,7 +204,7 @@ func _yard_detail(order: Dictionary) -> void:
 	var scale := minf(2.4,(174.0 if vertical else 210.0)/lane.length())
 	var mouth: Vector2 = frame.get_center() - lane * scale * 0.5
 	var yard: Vector2 = mouth + lane * scale
-	var stop: Vector2 = yard + (site.stop-site.yard) * YARD_SCALE
+	var stop: Vector2 = yard + (Dispatch.stop_for(order)-site.yard) * YARD_SCALE
 	var left := frame.position.x
 	var right := frame.end.x
 	var top := frame.position.y
@@ -251,7 +251,7 @@ func _yard_detail(order: Dictionary) -> void:
 		_text(Vector2(left+39,top+21),"staked bay",TYPE,13,ink)
 	canvas.draw_circle(stop,3.3,RED,true,-1,true)
 	canvas.draw_arc(stop,8.5,-.28,5.84,24,RED,1.5,true)
-	var fixture: String = Dispatch.fixture_for(order.site).trim_prefix("the ")
+	var fixture := Dispatch.stop_fixture(order).trim_prefix("the ")
 	var width := HAND.get_string_size(fixture,HORIZONTAL_ALIGNMENT_LEFT,-1,18).x
 	var text_at := stop + Vector2(18,26)
 	if text_at.x+width > right-12:

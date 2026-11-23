@@ -44,6 +44,7 @@ CUES = {
     "blade_drop": Cue(0.9, False, "A steel snowplow blade settling onto a packed snowy driveway. Brief hydraulic release and one low muffled metal clunk into granular snow. No engine or music."),
     "tow_chain": Cue(1.5, False, "Cold work gloves drawing a short tow chain tight and hooking steel onto a tow eye. Three close, weighty metal clinks in snow, then silence. No voices or music."),
     "mailbox": Cue(0.8, False, "One small rural sheet-metal mailbox getting clipped, a hollow tin bonk followed by the little door rattling against its latch. No voices or music."),
+    "payphone": Cue(5.5, True, "One second of a sharp mechanical brass telephone bell rattling inside an old American outdoor payphone, followed by four seconds of silence between calls. Isolated mono field recording of the phone, muted metal enclosure, no voices, no wind or music. Repeating ring cadence."),
 }
 
 

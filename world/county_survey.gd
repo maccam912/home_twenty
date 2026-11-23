@@ -39,6 +39,18 @@ const ARCHETYPES := {
 	"freight": ["the raised freight dock", "the bill box"],
 }
 
+# The painted mark is visible at the turn even when the buildings are lost in snow.
+const BUSINESS_SIGNS := {
+	"station": {"art": preload("res://world/art/signs/pike_service.webp"), "mark": "the winged spark plug", "width": 4.6},
+	"mill": {"art": preload("res://world/art/signs/bader_feed.webp"), "mark": "the painted sheaf of grain", "width": 4.4},
+	"kroll": {"art": preload("res://world/art/signs/kroll_dairy.webp"), "mark": "the green board with the cow on it", "width": 3.8},
+	"moen": {"art": preload("res://world/art/signs/moen_sugar_bush.webp"), "mark": "the big red maple leaf", "width": 3.6},
+	"reese": {"art": preload("res://world/art/signs/reese_repair.webp"), "mark": "the yellow wrench", "width": 4.0},
+	"lind": {"art": preload("res://world/art/signs/lind_orchard.webp"), "mark": "the painted apple", "width": 3.7},
+	"paulsen": {"art": preload("res://world/art/signs/paulsen_timber.webp"), "mark": "the pine tree and crosscut saw", "width": 4.5},
+	"dahl": {"art": preload("res://world/art/signs/dahl_transfer.webp"), "mark": "the yellow truck on the blue board", "width": 4.4},
+}
+
 # Contract, owner, building, street, station along the street, signed lane length.
 # On a vertical road positive lane length leads east; on a horizontal road it leads south.
 const HOLDINGS := [

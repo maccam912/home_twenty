@@ -320,8 +320,11 @@ static func directions(from: Vector2, site_id: String) -> String:
 			lines.append("Key me again on %s. It’s %s, by %s." % [road.name,site.name,site.landmark])
 			return " ".join(lines)
 	var turn := previous_heading.cross(site.mouth.direction_to(site.yard))
+	var direction := _bearing(site.mouth, site.yard)
 	if absf(turn) > .75:
-		lines.append("Take a %s at %s for %s." % ["right" if turn > 0 else "left",site.landmark,site.name])
+		direction = "right" if turn > 0 else "left"
+	if Survey.BUSINESS_SIGNS.has(site_id):
+		lines.append("Turn %s by %s. That's %s, with %s back in the yard." % [direction, Survey.BUSINESS_SIGNS[site_id].mark, site.name, site.landmark])
 	else:
-		lines.append("Take the %s drive at %s for %s." % [_bearing(site.mouth,site.yard),site.landmark,site.name])
+		lines.append("Turn %s at %s for %s." % [direction, site.landmark, site.name])
 	return " ".join(lines)

@@ -388,6 +388,34 @@ func set_cargo(item: String) -> void:
 				_piece(glove, wool, Vector3(x * .6, -.023, .012), "cloth").scale = Vector3(.048, .066, .036)
 			_box(_cargo, Vector3(0, .194, 0), Vector3(.286, .011, .018), "mapink")
 			_cargo_label("DRY MITTS", Vector3(0, .099, .079), .022)
+		"cells":
+			_box(_cargo, Vector3(0, .058, 0), Vector3(.305, .116, .28), "sack")
+			for x: float in [-.068, .068]:
+				for z: float in [-.064, .064]:
+					_box(_cargo, Vector3(x, .127, z), Vector3(.121, .17, .115), "mapink")
+					_box(_cargo, Vector3(x, .216, z), Vector3(.089, .018, .041), "paper")
+			_cargo_label("LANTERN 6V", Vector3(0, .059, .143), .022)
+		"apples":
+			_box(_cargo, Vector3(0, .085, 0), Vector3(.46, .17, .33), "sack")
+			var apple := SphereMesh.new()
+			apple.radial_segments = 7
+			apple.rings = 4
+			for col in 4:
+				for row in 3:
+					var at := Vector3(col * .104 - .156, .168, row * .097 - .097)
+					_piece(_cargo, apple, at, "oxblood" if (row + col) % 3 else "orange").scale = Vector3(.095, .086, .094)
+			for z: float in [-.169, .169]:
+				_box(_cargo, Vector3(0, .168, z), Vector3(.48, .069, .017), "sack")
+		"kindling":
+			for layer in 2:
+				for stick in (4 - layer):
+					var at := Vector3(stick * .062 - .093 + layer * .03, .031 + layer * .058, 0)
+					var wood := _box(_cargo, at, Vector3(.056, .058, .37 + stick * .011), "sack" if stick % 2 else "cloth")
+					wood.rotation.z = .07 * (stick - 1)
+			for z: float in [-.103, .103]:
+				_box(_cargo, Vector3(0, .117, z), Vector3(.199, .009, .012), "mapink")
+				for side: float in [-1, 1]:
+					_box(_cargo, Vector3(side * .11, .06, z), Vector3(.008, .117, .012), "mapink").rotation.z = side * .20
 		_:
 			push_error("Unknown truck cargo: " + item)
 			_cargo.free()
@@ -465,20 +493,20 @@ func _lighting() -> void:
 	for x: float in [-0.66, 0.66]:
 		var light := SpotLight3D.new()
 		light.position = Vector3(x, 1.53, -2.86)
-		light.rotation_degrees = Vector3(-7.0, -signf(x)*3.0, 0.0)
-		light.light_color = Color("#ffe5bb")
-		light.light_energy = 2.65
+		light.rotation_degrees = Vector3(-4.5, -signf(x)*3.0, 0.0)
+		light.light_color = Color("#ffedce")
+		light.light_energy = 4.2
 		light.spot_angle = 29.0
-		light.spot_range = 30.0
-		light.spot_attenuation = 0.77
+		light.spot_range = 44.0
+		light.spot_attenuation = 0.65
 		add_child(light)
 		_headlights.append(light)
 	var volume := MeshInstance3D.new()
 	var bounds := BoxMesh.new()
-	bounds.size = Vector3(13.6,3.8,20)
+	bounds.size = Vector3(17,5,28)
 	volume.mesh = bounds
 	volume.name = "LightInBlowingSnow"
-	volume.position = Vector3(0,1.34,-12.86)
+	volume.position = Vector3(0,1.53,-16.86)
 	volume.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	_scatter.shader = preload("res://vehicle/headlight_snow.gdshader")
 	_scatter.render_priority = -10
@@ -489,7 +517,7 @@ func _lighting() -> void:
 func set_storm_strength(strength:float) -> void:
 	_scatter.set_shader_parameter("gust",strength)
 	for lamp in _headlights:
-		lamp.spot_range = lerpf(31.0,24.0,strength)
+		lamp.spot_range = lerpf(44.0,34.0,strength)
 
 
 func blade_position(across := 0.0) -> Vector3:

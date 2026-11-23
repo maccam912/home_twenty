@@ -18,6 +18,7 @@ func _run() -> void:
 	_check_squalls(town)
 	_check_lamps(town)
 	_check_beam(town)
+	_check_highway_snow(town)
 	town.free()
 	if failures.is_empty():
 		print("PASS: gusts, weather visibility, localized lamps and snow illumination")
@@ -75,3 +76,18 @@ func _check_beam(town: Township) -> void:
 		_expect(position == at and heading.is_equal_approx(-chassis.z) and up.is_equal_approx(chassis.y), "light on blowing snow follows the pitched and banked headlights in a ditch")
 	town.set_truck_pose(Vector3.ZERO,Vector3.UP)
 	_expect(town.truck_position == at and town.truck_forward.is_equal_approx(-chassis.z), "a degenerate heading must preserve the last valid light volume")
+
+func _check_highway_snow(town: Township) -> void:
+	var camera := Camera3D.new()
+	town.add_child(camera)
+	camera.make_current()
+	town._process(0.)
+	var parked := town.snowfall.global_position - camera.global_position
+	for frame in 60:
+		camera.position.z -= 22. / 30.
+		town._process(1. / 30.)
+	var moving := town.snowfall.global_position - camera.global_position
+	_expect(parked.z - moving.z > 17., "the driver must keep entering fresh crosswind snow at 50 mph")
+	camera.position.z += 7.
+	town._process(1. / 30.)
+	_expect((town.snowfall.global_position - camera.global_position).is_equal_approx(parked), "a camera cut must restart snow around the new view")

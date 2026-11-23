@@ -18,6 +18,7 @@ func _run() -> void:
 	await physics_frame
 	var space := town.get_world_3d().direct_space_state
 	var labels := town.find_children("*", "Label3D", false, false)
+	_check_business_signs(town)
 	for id: String in Route.SITES:
 		if Route.CORE_SITES.has(id):
 			continue
@@ -53,6 +54,28 @@ func _run() -> void:
 		for reason in failures:
 			push_error(reason)
 	quit(int(not failures.is_empty()))
+
+func _check_business_signs(town: Township) -> void:
+	var faces := town.find_children("*", "MeshInstance3D", false, false)
+	for id: String in Route.Survey.BUSINESS_SIGNS:
+		var design: Dictionary = Route.Survey.BUSINESS_SIGNS[id]
+		var site: Dictionary = Route.SITES[id]
+		var traffic: Vector2 = site.mouth.direction_to(site.yard).orthogonal()
+		for direction: float in [-1.0, 1.0]:
+			var approach := traffic * direction
+			if not Route.directions(site.mouth + approach * 75.0, id).contains(design.mark):
+				failures.append("Deb's final turn misses the painted landmark at " + site.name)
+			var readable := false
+			for face: MeshInstance3D in faces:
+				var quad := face.mesh as QuadMesh
+				if not quad or not quad.material is StandardMaterial3D or quad.material.albedo_texture != design.art:
+					continue
+				var at := Vector2(face.position.x, face.position.z)
+				var normal := Vector2(face.basis.z.x, face.basis.z.z)
+				if at.distance_to(site.mouth) < 25.0 and normal.dot(approach) > .95:
+					readable = true
+			if not readable:
+				failures.append("Missing painted sign face on approach to " + site.name)
 
 func _check_ground(space: PhysicsDirectSpaceState3D, p: Vector2) -> float:
 	var ray := PhysicsRayQueryParameters3D.create(Vector3(p.x, 40, p.y), Vector3(p.x, -40, p.y), 2)

@@ -15,16 +15,24 @@ func check(ok: bool, message: String) -> void:
 func _initialize() -> void:
 	var opening_sites := {}
 	var opening_kinds := {}
-	for seed_value in 2400:
+	for seed_value in 400:
 		var deck := Dispatch.new(seed_value)
 		deck.start_shift()
 		opening_sites[deck.job.site] = true
 		opening_kinds[deck.job.kind] = true
+		var distance := Route.driving_distance(Route.HOME_PARK, Route.SITES[deck.job.site].mouth)
+		check(distance <= Dispatch.LOCAL_RUN, "Ignition sent the truck outside its working district")
 		var initial := deck.job.duplicate()
 		deck.start_shift()
 		check(deck.job == initial and deck.completed == 0, "Resuming a shift replaced its active order")
-	check(opening_sites.size() == Route.SITES.size(), "Every worksite should be reachable on a first order")
+	check(opening_sites.size() >= 3, "The home route offers several nearby properties")
 	check(opening_kinds.size() == 4, "The first call should draw from the full work rotation")
+	for seed_value in 24:
+		var rural := Dispatch.new(seed_value)
+		var road := Vector2(-5540, 800)
+		rural.start_shift(road)
+		check(Route.driving_distance(road, Route.SITES[rural.job.site].mouth) <= Dispatch.LOCAL_RUN,
+				"Dispatch must use the driver's actual departure point in the west district")
 
 	var deck := Dispatch.new(1998)
 	deck.lane_is_open = func(id: String) -> bool: return id == "beck"
@@ -36,8 +44,18 @@ func _initialize() -> void:
 	var freight := {}
 	var pickup := ""
 	var previous := ""
+	var departed := Route.HOME_PARK
+	var story_sites: Array[String] = []
 	while deck.completed < 600:
 		var job := deck.job
+		var distance := Route.driving_distance(departed, Route.SITES[job.site].mouth)
+		if job.kind == "story":
+			check(deck.completed >= job.after, "A priority slip arrived before the driver had worked the section")
+			check(distance <= Dispatch.ADJOINING_RUN * 1.5, "A priority slip called the driver across the county")
+			story_sites.append(job.site)
+		else:
+			check(distance <= Dispatch.ADJOINING_RUN, "A routine dispatch or freight leg sent the truck out of its district")
+		departed = Route.SITES[job.site].mouth
 		check(Route.SITES.has(job.site) and job.site != previous, "Each stop should send the driver to a different outdoor fixture")
 		previous = job.site
 		for field in ["brief", "instruction", "action", "speaker", "reply", "title"]:
@@ -67,5 +85,6 @@ func _initialize() -> void:
 		check(kinds[kind] > counts_at_two_hundred[kind] + 40, "Long-running shifts should keep generating %s work" % kind)
 	check(freight.size() == Dispatch.HAULS.size(), "Each shipment needs its own visible freight")
 	check(haul_pairs.size() >= 12, "Freight routes should vary both destination and cargo")
-	print("Dispatch: randomized ignition, continuous handoffs, lane persistence and 600 contracts. Failures: ", failures)
+	check(story_sites == ["station", "bell"], "Priority calls should appear in order and just once each")
+	print("Dispatch: local calls, short freight legs, both priority jobs and 600 contracts. Failures: ", failures)
 	quit(1 if failures else 0)
