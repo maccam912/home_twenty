@@ -1,5 +1,6 @@
 shader_type sky;
 uniform vec4 horizon : source_color = vec4(.19,.24,.28,1.);
+uniform vec4 ground_haze : source_color = vec4(.29,.345,.385,1.);
 uniform vec4 ceiling : source_color = vec4(.12,.16,.21,1.);
 uniform vec4 cloud_shadow : source_color = vec4(.07,.105,.14,1.);
 float h(vec2 p) {
@@ -17,5 +18,7 @@ void sky() {
 	p*=vec2(1.05,1.4);
 	float masses=cloud(p)*.62 + cloud(p*2.3+5.)*.26 + cloud(p*5.4-15.)*.12;
 	vec3 clouds=mix(ceiling.rgb,cloud_shadow.rgb,smoothstep(.21,.73,masses));
-	COLOR=mix(horizon.rgb,clouds,smoothstep(-.02,.53,rise));
+	vec3 overcast = mix(horizon.rgb,clouds,smoothstep(-.02,.53,rise));
+	// Blown powder lightens the bottom few degrees of sky across the open flats.
+	COLOR = mix(ground_haze.rgb,overcast,smoothstep(.004,.069+.024*masses,rise));
 }

@@ -1,5 +1,9 @@
 extends Node3D
 
+const Route = preload("res://world/route.gd")
+const BECK_TANK = preload("res://world/props/beck_tank.tscn")
+const BECK_MAILBOX = preload("res://world/props/beck_mailbox.tscn")
+const DRIFT_TILE := 96.0
 const SNOW_SHADER = preload("res://world/storm_snow.gdshader")
 const FLAKE_SHADER = preload("res://world/wind_flake.gdshader")
 const CLOUD_SHADER = preload("res://world/overcast.gdshader")
@@ -18,12 +22,13 @@ var snowfall: CPUParticles3D
 var weather_camera: Camera3D
 var gust_strength := 0.0
 var storm_seconds := 0.0
+var ground_snow: Node3D
 var storm_env: Environment
 var flake_material := ShaderMaterial.new()
 var drift_material := ShaderMaterial.new()
 var lamp_centers := PackedVector3Array()
-var truck_position := Vector3(0,0,44)
-var truck_forward := Vector3.FORWARD
+var truck_position := Vector3(Route.HOME_PARK.x,0,Route.HOME_PARK.y)
+var truck_forward := Vector3.RIGHT
 
 func _ready() -> void:
 	rng.seed = 7581958
@@ -75,6 +80,7 @@ func _materials() -> void:
 		mats[key] = mat
 	var snow := ShaderMaterial.new()
 	snow.shader = SNOW_SHADER
+	snow.set_shader_parameter("ground_contacts",Route.SNOW_CONTACTS)
 	mats["snow"] = snow
 	for key in ["cream_siding", "green_siding", "barn_siding", "shed_siding", "cream_board"]:
 		var mat := ShaderMaterial.new()
@@ -102,22 +108,22 @@ func _light_and_weather() -> void:
 	sky.sky_material = dome
 	storm_env.sky = sky
 	storm_env.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
-	storm_env.ambient_light_color = Color("#748398")
-	storm_env.ambient_light_energy = .36
+	storm_env.ambient_light_color = Color("#8895a2")
+	storm_env.ambient_light_energy = .43
 	storm_env.reflected_light_source = Environment.REFLECTION_SOURCE_DISABLED
 	storm_env.fog_enabled = true
-	storm_env.fog_light_color = Color("#364654")
+	storm_env.fog_light_color = Color("#54636c")
 	storm_env.fog_light_energy = .90
-	storm_env.fog_density = .023
-	storm_env.fog_sky_affect = .25
+	storm_env.fog_density = .0032
+	storm_env.fog_sky_affect = .13
 	storm_env.tonemap_mode = Environment.TONE_MAPPER_LINEAR
 	world.environment = storm_env
 	add_child(world)
 	var sky_light := DirectionalLight3D.new()
 	sky_light.name = "SnowCloudBounce"
 	sky_light.rotation_degrees = Vector3(-61, -38, 0)
-	sky_light.light_color = Color("#8e9ba7")
-	sky_light.light_energy = .19
+	sky_light.light_color = Color("#a3adb5")
+	sky_light.light_energy = .22
 	sky_light.shadow_enabled = false
 	add_child(sky_light)
 
@@ -146,38 +152,39 @@ func _light_and_weather() -> void:
 	add_child(snowfall)
 	_ground_snow()
 
-# Low streaks of powder cross the entire route on the wind. Geometry stays in the world
-# when the driver turns, so individual streamers pass through both halves of the windshield.
+# The powder stays anchored to the fields. Shifting the patch by a whole tile
+# preserves the ribbons around the cab and recycles the ones beyond visibility.
 func _ground_snow() -> void:
 	var ribbons := SurfaceTool.new()
 	ribbons.begin(Mesh.PRIMITIVE_TRIANGLES)
 	var source := RandomNumberGenerator.new()
 	source.seed = 1998127
-	for i in range(114):
-		var on_lane := i>=86
-		var z := source.randf_range(-46,-31) if on_lane else source.randf_range(-145,83)
-		var x := source.randf_range(4,54) if on_lane else source.randf_range(-22,23)
-		var across := Vector2(source.randf_range(15,32),source.randf_range(-5,8))
-		var h := source.randf_range(.64,1.65)
-		if i % 7 == 0:
-			h *= 1.60
-		var center := Vector2(x,z)
-		var bottom := .27
-		# A slight crosswind tilt gives the upper edge some depth seen from the lane.
+	for i in range(44):
+		var center := Vector2(source.randf_range(-.5,.5), source.randf_range(-.5,.5)) * DRIFT_TILE
+		var across := Vector2(source.randf_range(16,39),source.randf_range(-4,10))
+		var h := source.randf_range(.48,1.4)
+		if i % 9 == 0:
+			h *= 1.6
 		var top_offset := Vector2(source.randf_range(-.3,1.0), source.randf_range(.25,1.25))
 		var surface_normal := Vector3(across.y,0,-across.x).normalized()
 		for uvs:Vector2 in [Vector2(0,0),Vector2(1,0),Vector2(1,1),Vector2(0,0),Vector2(1,1),Vector2(0,1)]:
 			var point := center+(uvs.x-.5)*across+top_offset*uvs.y
 			ribbons.set_uv(uvs)
 			ribbons.set_normal(surface_normal)
-			ribbons.add_vertex(Vector3(point.x,bottom+uvs.y*h,point.y))
+			ribbons.add_vertex(Vector3(point.x,.24+uvs.y*h,point.y))
 	drift_material.shader = preload("res://world/spindrift.gdshader")
-	var layer := MeshInstance3D.new()
-	layer.name = "RunningGroundSnow"
-	layer.mesh = ribbons.commit()
-	layer.material_override = drift_material
-	layer.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-	add_child(layer)
+	var sheet := ribbons.commit()
+	ground_snow = Node3D.new()
+	ground_snow.name = "RunningGroundSnow"
+	add_child(ground_snow)
+	for x in range(-1,2):
+		for z in range(-1,2):
+			var tile := MeshInstance3D.new()
+			tile.mesh = sheet
+			tile.position = Vector3(x * DRIFT_TILE, 0, z * DRIFT_TILE)
+			tile.material_override = drift_material
+			tile.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+			ground_snow.add_child(tile)
 
 func set_truck_pose(at: Vector3, forward: Vector3) -> void:
 	var flat_heading := Vector3(forward.x,0,forward.z)
@@ -191,60 +198,71 @@ func set_truck_pose(at: Vector3, forward: Vector3) -> void:
 
 func _process(delta: float) -> void:
 	storm_seconds += delta
-	var pulse := .50 + .29*sin(storm_seconds*.51+.2) + .17*sin(storm_seconds*.92-.9) + .12*sin(storm_seconds*.17+1.4)
-	gust_strength = smoothstep(.22,.86,pulse)
-	storm_env.fog_density = lerpf(.018,.039,gust_strength)
+	var pulse := .43 + .35*sin(storm_seconds*.103-1.43) + .12*sin(storm_seconds*.237+.35) + .09*sin(storm_seconds*.053-.20)
+	gust_strength = smoothstep(.36,.88,pulse)
+	storm_env.fog_density = lerpf(.0032,.029,gust_strength)
+	storm_env.fog_sky_affect = lerpf(.13,.81,gust_strength)
 	snowfall.gravity = Vector3(1.4+gust_strength*3.5,-.14,.31+gust_strength*.45)
 	flake_material.set_shader_parameter("gust",gust_strength)
 	drift_material.set_shader_parameter("gust",gust_strength)
 	drift_material.set_shader_parameter("storm_seconds",storm_seconds)
 	var camera := get_viewport().get_camera_3d()
 	if camera:
+		var eye := camera.global_position
+		ground_snow.position = Vector3(snappedf(eye.x,DRIFT_TILE), 0, snappedf(eye.z,DRIFT_TILE))
 		snowfall.global_position = camera.global_position + Vector3(-10, 4.2, -2.6) - camera.global_basis.z*6.
 		if weather_camera != camera:
 			snowfall.restart()
 			weather_camera = camera
 
 func _snowfield() -> void:
-	_box(Vector3(0,-0.12,-15), Vector3(750,0.23,750), "snow")
-	_block("Snow ground", Vector3(0,-0.26,-15), Vector3(375,0.52,390))
-	for x in [-98.0, 98.0]:
-		_block("Field edge", Vector3(x,1.6,-28), Vector3(2,5,245))
-	for z in [-145.0, 81.0]:
-		_block("Far field edge", Vector3(0,1.6,z), Vector3(198,5,2))
+	var middle_z := (Route.ROAD_NORTH_Z + Route.ROAD_SOUTH_Z) * .5
+	var length := Route.ROAD_SOUTH_Z - Route.ROAD_NORTH_Z
+	_box(Vector3(0,-.12,middle_z), Vector3(3400,.23,length+2400), "snow")
+	_block("Snow ground", Vector3(0,-.26,middle_z), Vector3(1400,.52,length+170))
+	for x in [-695.0,695.0]:
+		_block("Field edge", Vector3(x,1.6,middle_z), Vector3(2,5,length+170))
+	for z in [Route.ROAD_NORTH_Z-80.0, Route.ROAD_SOUTH_Z+80.0]:
+		_block("Far field edge", Vector3(0,1.6,z), Vector3(1400,5,2))
+
+	# Low shoulder ridges follow the ditched road. Leave breaks for the approaches.
 	for side: int in [-1,1]:
-		for i in range(50):
-			var z := rng.randf_range(-144,76)
-			if (side == 1 and absf(z + 38) < 5.0) or (side == -1 and absf(z - 38) < 5.6):
-				continue
-			var width := rng.randf_range(1.4, 3.0)
-			var x := side * (4.15 + width * 0.5 + rng.randf_range(0.0,1.5))
-			_shape(drift_forms[i%drift_forms.size()], Vector3(x, -0.01, z), Vector3(width, rng.randf_range(0.31,0.77), rng.randf_range(5.0,12.6)), "snow", Vector3(0, PI if side < 0 else 0.0, 0))
-	for i in range(100):
-		var x := rng.randf_range(-174,175)
-		var z := rng.randf_range(-179,115)
-		if absf(x) < 9 or (x > -8 and x < 58 and absf(z + 38) < 9) or (x < 0 and x > -24 and absf(z - 38) < 6):
+		var z := Route.ROAD_NORTH_Z
+		while z < Route.ROAD_SOUTH_Z:
+			var ridge_length := rng.randf_range(8.0,23.0)
+			z += ridge_length*.5
+			var entrance := Route.HOME_Z if side < 0 else Route.BECK_Z
+			if absf(z-entrance) > ridge_length*.5+7.0:
+				var width := rng.randf_range(1.6,3.9)
+				var x := side * (4.35 + width*.5 + rng.randf_range(0,1.4))
+				_drift(Vector3(x,-.015,z),Vector3(width,rng.randf_range(.15,.57),ridge_length),PI if side < 0 else 0.0)
+			z += ridge_length*.5 + rng.randf_range(1.0,9.0)
+	# Shallow sheets across the flats catch the ambient light. The horizon stays level.
+	for i in range(175):
+		var x := rng.randf_range(21,590) * (-1 if i%2 else 1)
+		var z := rng.randf_range(Route.ROAD_NORTH_Z-100,Route.ROAD_SOUTH_Z+100)
+		if (x > 0 and absf(z-Route.BECK_Z)<34) or (x < 0 and absf(z-Route.HOME_Z)<32):
 			continue
-		_shape(mound, Vector3(x,-0.28,z), Vector3(rng.randf_range(3,12),rng.randf_range(0.6,1.95),rng.randf_range(3,9)), "snow")
-	for i in range(54):
-		var x := rng.randf_range(-210,210)
-		var z := rng.randf_range(-193,160)
-		if absf(x) < 75 and z > -129 and z < 81:
-			continue
-		_shape(mound, Vector3(x,-2.0,z), Vector3(rng.randf_range(38,80),rng.randf_range(6,18),rng.randf_range(34,69)), "snow")
+		_drift(Vector3(x,-.07,z),Vector3(rng.randf_range(8,23),rng.randf_range(.18,.65),rng.randf_range(22,60)),rng.randf_range(1.06,1.39))
+	# The cleared county route runs out in old plow banks at the playable limits.
+	for z in [Route.ROAD_NORTH_Z-3.0, Route.ROAD_SOUTH_Z+3.0]:
+		_drift(Vector3(0,0,z),Vector3(7.4,1.55,26),PI*.46)
+
+func _drift(at: Vector3, dims: Vector3, yaw: float) -> void:
+	_shape(drift_forms[rng.randi_range(0,drift_forms.size()-1)],at,dims,"snow",Vector3(0,yaw,0))
 
 func _buildings() -> void:
-	_house(Vector3(-19.0,0,38), PI / 2.0, "cream_siding", true)
-	_house(Vector3(45.5,0,-24.6), PI, "green_siding", false)
-	_barn(Vector3(23.5,0,-61.5), -0.10, Vector3(13,5.5,15), true)
-	_silo(Vector3(35.6,0,-64), 2.65, 13.5)
-	_barn(Vector3(-23.5,0,16.5), PI / 2.0, Vector3(14,3.7,8), false)
-	_corn_crib(Vector3(19.5,0,3.5), -0.12)
-	_tank(Vector3(46,0,-44))
-	_barn(Vector3(-41.0,0,-80.0), 0.04, Vector3(15.0,5.2,10.0), false)
-	_silo(Vector3(-47.9,0,-88.5), 2.8, 16.4)
-	_silo(Vector3(-54.0,0,-89.0), 2.55, 15.8)
-	_barn(Vector3(18.0,0,-112), 0.35, Vector3(9.0,4.0,8.0), false)
+	_house(Route.HOME_HOUSE, PI / 2.0, "cream_siding", true)
+	_barn(Route.HOME_HOUSE+Vector3(-23,0,-31), PI / 2.0, Vector3(14,3.7,8), false)
+	_house(Route.BECK_HOUSE, PI, "green_siding", false)
+	_tank(Route.TANK)
+	_barn(Vector3(164.5,0,Route.BECK_Z-32), -.10, Vector3(13,5.5,15), true)
+	_silo(Vector3(180.5,0,Route.BECK_Z-36), 2.65, 13.5)
+	_corn_crib(Vector3(68,0,Route.COOP_Z-38), -.12)
+	# A second farm sits well back across the western section.
+	_barn(Vector3(-244,0,-1143), .04, Vector3(15,5.2,10), false)
+	_silo(Vector3(-253,0,-1154), 2.8, 16.4)
+	_silo(Vector3(-260,0,-1156), 2.55, 15.8)
 
 func _house(at: Vector3, yaw: float, siding: String, home: bool) -> void:
 	var axes := Basis(Vector3.UP, yaw)
@@ -368,57 +386,62 @@ func _corn_crib(at: Vector3, yaw: float) -> void:
 		_local(t,Vector3(0,1.60,z+signf(z)*0.13),Vector3(0.14,6.22,0.11),"wood",Vector3(0,0,1.10))
 
 func _tank(at: Vector3) -> void:
-	for x in [-1.28, 1.28]:
-		_box(at + Vector3(x,0.32,0),Vector3(0.37,0.64,1.25),"stone")
-	_shape(drum,at+Vector3.UP*1.08,Vector3(1.55,3.78,1.55),"tank",Vector3(0,0,PI/2))
-	for x in [-1.88,1.88]:
-		_shape(mound, at+Vector3(x,1.08,0), Vector3(1.14,1.54,1.54), "tank")
-	_shape(mound, at+Vector3(0,1.78,0), Vector3(3.87,0.29,1.18), "snow")
-	_shape(mound, at+Vector3(-0.45,1.90,0), Vector3(0.81,0.48,0.64), "galv")
-	_block("Propane tank",at+Vector3.UP*0.9,Vector3(4.28,1.8,1.43))
-	_box(at+Vector3(0,1.0,0.78),Vector3(1.2,0.37,0.035),"green")
-	_letter("L P   G A S", at+Vector3(0,1.0,0.80), 0, 0.0031)
+	var tank := BECK_TANK.instantiate() as Node3D
+	tank.position = at
+	add_child(tank)
+	_block("Propane tank",at+Vector3.UP*.9,Vector3(4.28,1.8,1.43))
 
 func _road_furniture() -> void:
+	# Thirty-five 46 m spans separate the two farm services along the section line.
 	var previous := Vector3.ZERO
-	for i in range(10):
-		var p := Vector3(-7.80 - (i % 3)*0.22, 0, 74-i*25.5)
-		_utility_pole(p, i%3 == 1)
-		if i == 2 or i == 5:
-			_road_lamp(p)
-		if i:
+	var first_z := Route.HOME_Z + 13.0
+	var first_span := floori((first_z-Route.ROAD_SOUTH_Z)/46.0)
+	var last_span := ceili((first_z-Route.ROAD_NORTH_Z)/46.0)
+	for span in range(first_span,last_span+1):
+		var p := Vector3(-8.8 - sin(span*.57)*.24,0,first_z-span*46.0)
+		var near_home := is_equal_approx(p.z,Route.HOME_Z+13)
+		var near_beck := is_equal_approx(p.z,Route.BECK_Z+13)
+		_utility_pole(p, near_home or near_beck)
+		if span > first_span:
 			for off in [-1.2,0.0,1.2]:
-				_wire(p+Vector3(off,8.85,0),previous+Vector3(off,8.85,0),0.76)
-			_wire(p+Vector3(0.14,7.05,0),previous+Vector3(0.14,7.05,0),0.94)
+				_wire(p+Vector3(off,8.85,0),previous+Vector3(off,8.85,0),1.20)
+			_wire(p+Vector3(.14,7.05,0),previous+Vector3(.14,7.05,0),1.45)
+		if near_home or near_beck:
+			_road_lamp(p)
+			var house := Route.HOME_HOUSE if near_home else Route.BECK_HOUSE
+			var service := Vector3(-53 if near_home else 63,0,p.z+4)
+			_utility_pole(service,false)
+			_wire(p+Vector3(.14,7.05,0),service+Vector3(.14,7.05,0),1.04)
+			_wire(service+Vector3(.14,7.05,0),house+Vector3(1.5,5.0,1.5),.95)
 		previous = p
-	# Phone service drops disappear into farmyards.
-	_wire(Vector3(-7.95,7.05,48.5),Vector3(-15,4.70,42.1),0.39)
-	_wire(Vector3(-8.1,8.5,-28),Vector3(36,6.0,-20),1.5)
-	for sign_x: int in [-1,1]:
-		for z in range(-124,73,12):
-			if (sign_x == 1 and abs(z+38)<6) or (sign_x == -1 and abs(z-38)<5):
-				continue
-			_snow_stake(Vector3(sign_x*rng.randf_range(4.44,4.89),0,z+rng.randf_range(-0.58,0.58)))
-	for x in [9.2,20.7,32.4]:
-		_snow_stake(Vector3(x,0,-40.9))
-		_snow_stake(Vector3(x,0,-35.15))
-	_mailbox(Vector3(-4.95,0,40.8), PI/2, "1816")
-	_mailbox(Vector3(6.20,0,-33.4), -0.18, "1838")
-	_road_sign(Vector3(4.86,0,22.4))
-	var s := Vector3(6.85,0,-43.0)
-	_box(s+Vector3(0,1.17,0),Vector3(0.12,2.34,0.12),"galv")
-	_box(s+Vector3(0,2.30,0),Vector3(2.22,0.40,0.07),"green")
-	_box(s+Vector3(0,2.52,0),Vector3(2.25,0.05,0.13),"snow")
-	_letter("BECK LANE",s+Vector3(0,2.30,0.055),0,0.0059)
-	_fence(Vector3(8.7,0,55), Vector3(9.3,0,18), 3.8)
-	_fence(Vector3(10.5,0,-15.5), Vector3(10.5,0,-31), 4.2)
-	_fence(Vector3(10.5,0,-31), Vector3(28.5,0,-31), 4.0)
-	_fence(Vector3(13.1,0,-45), Vector3(13.1,0,-68), 4.0)
-	_fence(Vector3(-14.5,0,7), Vector3(-14.5,0,-23), 4.1)
-	_fence(Vector3(-14.5,0,-23), Vector3(-31,0,-23), 4.2)
+	for crossing: float in [Route.HOME_Z-285.0, Route.COOP_Z-320.0]:
+		for side in [-1,1]:
+			for offset in [-5.0,5.0]:
+				_snow_stake(Vector3(side*5.4,0,crossing+offset))
+	for x in [8.6,27.5,52.0,82.8,108.2]:
+		_snow_stake(Vector3(x,0,Route.BECK_Z-3.4))
+		_snow_stake(Vector3(x+1.5,0,Route.BECK_Z+3.4))
+	for x in [-8.8,-32.0,-61.5]:
+		_snow_stake(Vector3(x,0,Route.HOME_Z-3.5))
+		_snow_stake(Vector3(x-1.2,0,Route.HOME_Z+3.5))
+	_mailbox(Vector3(-5.4,0,Route.HOME_Z+4.7), 2.42, "1816")
+	var beck_box := BECK_MAILBOX.instantiate() as Node3D
+	beck_box.position = Route.BECK_MAILBOX
+	beck_box.rotation.y = -.24
+	add_child(beck_box)
+	_road_sign(Vector3(5.7,0,Route.HOME_Z-45.0))
+	var s := Vector3(6.15,0,Route.BECK_Z-5.3)
+	_box(s+Vector3(0,1.17,0),Vector3(.12,2.34,.12),"galv")
+	_box(s+Vector3(0,2.30,0),Vector3(2.22,.40,.07),"green")
+	_box(s+Vector3(0,2.52,0),Vector3(2.25,.05,.13),"snow")
+	_letter("BECK LANE",s+Vector3(0,2.30,.055),0,.0059)
+	_fence(Vector3(-71,0,Route.HOME_Z+10),Vector3(-122,0,Route.HOME_Z+10),4.6)
+	_fence(Vector3(129,0,Route.BECK_Z-18),Vector3(171,0,Route.BECK_Z-18),4.6)
+	_fence(Vector3(171,0,Route.BECK_Z-18),Vector3(171,0,Route.BECK_Z-28),4.6)
+	_fence(Vector3(39,0,Route.COOP_Z-55),Vector3(109,0,Route.COOP_Z-55),4.7)
 
 func _feed_sign() -> void:
-	var mount := Transform3D(Basis(Vector3.UP,-.32),Vector3(8.5,0,-3))
+	var mount := Transform3D(Basis(Vector3.UP,-.32),Vector3(9.3,0,Route.COOP_Z))
 	for x:float in [-1.4,1.4]:
 		_local(mount,Vector3(x,1.37,0),Vector3(.19,2.74,.19),"creosote")
 		_block("Co-op signpost",mount*Vector3(x,.9,0),Vector3(.2,1.8,.2))
@@ -505,41 +528,36 @@ func _wire(a: Vector3, b: Vector3, sag: float, thickness := 0.045) -> void:
 		last = point
 
 func _tree_lines() -> void:
-	for pos in [Vector3(-15,0,52),Vector3(-23,0,49),Vector3(14,0,41),Vector3(18,0,37),
-		Vector3(12,0,20),Vector3(-11.9,0,27),Vector3(-14.2,0,-2),Vector3(-19.0,0,-6.0),
-		Vector3(26,0,-5),Vector3(32,0,-14),Vector3(15.6,0,-23),Vector3(-13.4,0,-46),
-		Vector3(52.8,0,-15),Vector3(56.0,0,-21),Vector3(62,0,-28),Vector3(-17.0,0,-63)]:
-		_pine(pos,rng.randf_range(6.8,12.4))
-	for pos in [Vector3(-9.4,0,16),Vector3(12,0,11),Vector3(19.4,0,14.1),Vector3(11.5,0,-14),
-		Vector3(18.4,0,-29.0),Vector3(-11,0,-37),Vector3(-18.2,0,-29),Vector3(56.8,0,-35),
-		Vector3(-10.6,0,54),Vector3(-14.5,0,47),Vector3(-11.4,0,69),Vector3(35,0,-18.5)]:
-		_bare_tree(pos,rng.randf_range(5.9,10.0), true)
-	for i in range(270):
-		var x := rng.randf_range(-134,135)
-		var z := rng.randf_range(-173,102)
-		var allowed := (x < -33 or x > 66 or z < -125 or z > 67)
-		if not allowed or (x > -65 and x < -27 and z < -64 and z > -102):
-			continue
-		var n := (sin(z*0.092+x*0.09)+cos(x*0.12-z*0.03))
-		if n < -0.25:
-			continue
-		if i%5 == 0:
-			_bare_tree(Vector3(x,0,z),rng.randf_range(7,14),false)
-		else:
-			_pine(Vector3(x,0,z),rng.randf_range(6.8,15.5),true)
-	# The irregular, wind-flattened bands of stalks keep white fields from becoming empty planes.
-	for i in range(170):
-		var x := rng.randf_range(-53,70)
-		var z := rng.randf_range(-117,77)
-		if absf(x)<6.5 or (x>-4 and x<57 and absf(z+38)<8) or (x<0 and x>-24 and absf(z-38)<6.5):
-			continue
-		if sin(x*0.24+z*0.19)+cos((x-z)*0.13)<0.0:
+	for pos: Vector3 in [Vector3(-82,0,Route.HOME_Z+13), Vector3(-104,0,Route.HOME_Z+20),
+		Vector3(-117,0,Route.HOME_Z+9), Vector3(140,0,Route.BECK_Z+30),
+		Vector3(153,0,Route.BECK_Z+24), Vector3(161,0,Route.BECK_Z+38)]:
+		_pine(pos,rng.randf_range(8.2,13.1))
+	for pos: Vector3 in [Vector3(-106,0,Route.HOME_Z-17),Vector3(-72,0,Route.HOME_Z-9),
+		Vector3(99,0,Route.BECK_Z+12),Vector3(145,0,Route.BECK_Z-23),
+		Vector3(36,0,Route.COOP_Z-33),Vector3(42,0,Route.COOP_Z-35)]:
+		_bare_tree(pos,rng.randf_range(6.8,10.3),true)
+
+	# Discrete windbreaks mark distant property lines, leaving the central fields open.
+	for stand: Vector2 in [Vector2(301,92),Vector2(-314,-362),Vector2(408,-718),
+		Vector2(-264,-1142),Vector2(358,-1440),Vector2(-316,-1669)]:
+		for i in range(13):
+			var x := stand.x + rng.randf_range(-14,14)
+			var z := stand.y + i*4.3 + rng.randf_range(-4.3,4.3)
+			if i%4 == 0:
+				_bare_tree(Vector3(x,0,z),rng.randf_range(7,13),false)
+			else:
+				_pine(Vector3(x,0,z),rng.randf_range(7,15),true)
+	# Isolated stalks and broken fencelines surface where the fields meet the ditch.
+	for i in range(140):
+		var x := rng.randf_range(8.5,48.0) * (-1 if i%2 else 1)
+		var z := rng.randf_range(Route.ROAD_NORTH_Z,Route.ROAD_SOUTH_Z)
+		if (x < 0 and absf(z-Route.HOME_Z)<8) or (x > 0 and absf(z-Route.BECK_Z)<8):
 			continue
 		for j in range(rng.randi_range(3,8)):
-			var base := Vector3(x+rng.randf_range(-1.2,1.2),0.08,z+rng.randf_range(-0.9,0.9))
-			var stem := base+Vector3(rng.randf_range(-0.14,0.14),rng.randf_range(0.32,0.82),rng.randf_range(-0.14,0.03))
-			_beam(base,stem,0.034,"grass")
-			_beam(base.lerp(stem,0.62),stem+Vector3(0.15,-0.13,0.06),0.026,"grass")
+			var base := Vector3(x+rng.randf_range(-1.2,1.2),.08,z+rng.randf_range(-.9,.9))
+			var stem := base+Vector3(rng.randf_range(-.15,.26),rng.randf_range(.25,.65),rng.randf_range(-.14,.03))
+			_beam(base,stem,.031,"grass")
+			_beam(base.lerp(stem,.62),stem+Vector3(.15,-.13,.06),.025,"grass")
 
 func _load_woodlot() -> void:
 	# The Blender layout holds each sculpt at its own workbench position.
@@ -558,7 +576,7 @@ func _pine(at: Vector3, height: float, distant: bool = false) -> void:
 	var scale_to_height := Vector3(width,height,width)*0.1
 	_shape(tree_meshes["Spruce%dBoughs%s" % [variant,suffix]],at,scale_to_height,"spruce_needles",rot)
 	_shape(tree_meshes["Spruce%dWood%s" % [variant,suffix]],at,scale_to_height,"tree_bark",rot)
-	if absf(at.x)<64 and at.z > -120 and at.z < 67:
+	if not distant:
 		_block("Spruce trunk",at+Vector3.UP*2.0,Vector3(height*0.039,4.0,height*0.039))
 
 func _bare_tree(at: Vector3, height: float, near: bool) -> void:

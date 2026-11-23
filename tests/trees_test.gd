@@ -1,5 +1,6 @@
 extends SceneTree
 
+const Route = preload("res://world/route.gd")
 const Township = preload("res://world/township.gd")
 const BOUGH_TEXTURE = preload("res://world/trees/snow_bough.webp")
 var failures := 0
@@ -81,9 +82,9 @@ func _check_stands(town: Node3D) -> void:
 
 func _check_clearance(town: Node3D) -> void:
 	var space := town.get_world_3d().direct_space_state
-	var trunk := PhysicsRayQueryParameters3D.create(Vector3(-13.0,1.4,27),Vector3(-11.0,1.4,27))
+	var trunk := PhysicsRayQueryParameters3D.create(Vector3(-83.0,1.4,Route.HOME_Z+13),Vector3(-81.0,1.4,Route.HOME_Z+13))
 	expect(not space.intersect_ray(trunk).is_empty(),"Roadside spruce lost its trunk collider")
-	var road := PhysicsRayQueryParameters3D.create(Vector3(0,1.4,44),Vector3(0,1.4,-105))
+	var road := PhysicsRayQueryParameters3D.create(Vector3(0,1.4,Route.HOME_Z),Vector3(0,1.4,Route.BECK_Z))
 	expect(space.intersect_ray(road).is_empty(),"A collider blocks the middle of County Q")
-	var lane := PhysicsRayQueryParameters3D.create(Vector3(1,1.4,-38),Vector3(44,1.4,-38))
+	var lane := PhysicsRayQueryParameters3D.create(Vector3(1,1.4,Route.BECK_Z),Vector3(Route.BECK_PARK.x,1.4,Route.BECK_Z))
 	expect(space.intersect_ray(lane).is_empty(),"A collider blocks the tank lane")

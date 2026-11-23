@@ -36,6 +36,8 @@ void fragment() {
 	ALBEDO = mix(mist, vec3(.86,.63,.40), illumination.y*.66);
 	vec3 eye = CAMERA_POSITION_WORLD - at;
 	float incidence = abs(dot(normalize(eye),sheet_normal));
-	float reveal = smoothstep(.13,.52,incidence)*smoothstep(1.1,4.,length(eye));
+	float eye_distance = length(eye);
+	float reveal = smoothstep(.13,.52,incidence)*smoothstep(1.1,4.,eye_distance);
+	reveal *= 1. - smoothstep(52.,76.,eye_distance);
 	ALPHA = reveal*mask*(.15+.44*gust+.18*max(illumination.x,illumination.y));
 }

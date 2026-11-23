@@ -1,5 +1,6 @@
 extends SceneTree
 
+const Route = preload("res://world/route.gd")
 const Township = preload("res://world/township.gd")
 var failures := PackedStringArray()
 
@@ -64,7 +65,7 @@ func _check_lamps(town: Township) -> void:
 		_expect(centers.size()==porches.size()+street_lamps.size(), "powder scattering must use the positions of the installed lights")
 
 func _check_beam(town: Township) -> void:
-	var at := Vector3(33.,0.,-38.)
+	var at := Vector3(33.,0.,Route.BECK_Z)
 	town.set_truck_pose(at,Vector3(3.,.5,0.))
 	for surface: ShaderMaterial in [town.flake_material,town.drift_material]:
 		var position: Vector3 = surface.get_shader_parameter("truck_position")

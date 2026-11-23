@@ -6,7 +6,8 @@ signal cab_changed
 signal collapse_recovered
 
 const TruckMesh = preload("res://vehicle/truck_mesh.gd")
-const TRUCK_START := Vector3(0, 0, 44)
+const Route = preload("res://world/route.gd")
+const TRUCK_START := Vector3(Route.HOME_PARK.x, 0.0, Route.HOME_PARK.y)
 const WHEELBASE := 3.24
 const WALK_SPEED := 2.9
 
@@ -40,6 +41,7 @@ func _ready() -> void:
 	_truck.wall_min_slide_angle = 0.0
 	add_child(_truck)
 	_truck.global_position = TRUCK_START
+	_truck.rotation.y = -PI / 2.0
 	var hull := CollisionShape3D.new()
 	var box := BoxShape3D.new()
 	box.size = Vector3(1.96, 1.38, 5.28)
@@ -67,7 +69,7 @@ func _ready() -> void:
 	_camera = Camera3D.new()
 	_camera.name = "DriverCamera"
 	_camera.near = 0.055
-	_camera.far = 500
+	_camera.far = 1400
 	_camera.fov = 64
 	add_child(_camera)
 	_camera.make_current()

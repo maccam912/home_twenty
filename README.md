@@ -25,6 +25,8 @@ To play from source, open the project in Godot 4.7 and press F6 on `game/shift.t
 | M / Tab | Open your marked plat book. |
 | Esc | Pause or resume. |
 
+Start up the home drive and turn left on County Q. The Beck mailbox is a mile north, past the co-op sign. Their unloading yard sits about 400 feet back from the road.
+
 The blade cuts a continuous path where you drive it. At the Becks’, start at the mouth of the lane on Q and carry the pass through to the unloading area. Outside the truck, frost builds up. Return to the cab to warm up.
 
 ## Sound effects

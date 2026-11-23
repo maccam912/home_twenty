@@ -8,26 +8,27 @@ func _run() -> void:
 	await process_frame
 	shift.begin_shift()
 	var driver = shift.driver
+	check(absf((Route.HOME_Z - Route.BECK_Z) - 1609.344) < 80, "The mile in Deb’s directions agrees with the road distance")
 	# An unreported job must never silently complete simply because a porch is nearby.
-	driver._truck.global_position = Vector3(43,0,-33)
+	driver._truck.global_position = Vector3(Route.BECK_PARK.x, 0, Route.BECK_Z)
 	shift.check_job()
 	check(shift.stage==0 and shift.hud.speaker=="IN THE CAB","House interactions require getting out")
 	await _tap(KEY_E)
-	driver._walker.global_position = Vector3(43,0,-30)
+	driver._walker.global_position = Vector3(Route.BECK_PORCH.x, 0, Route.BECK_PORCH.y)
 	shift.check_job()
 	check(shift.stage==0 and shift.hud.speaker=="AT THE BECKS’ DOOR","Mrs. Beck checks lane completion")
-	driver._walker.global_position = Vector3(-12,0,38)
+	driver._walker.global_position = Vector3(Route.HOME_PORCH.x, 0, Route.HOME_PORCH.y)
 	shift.check_job()
 	check(shift.stage==0 and shift.hud.speaker.begins_with("DEB"),"Home stays visitable before the first contract is done")
 	shift.stage = 1
 	shift.check_job()
 	check(shift.stage==1,"The wrong porch cannot advance the welfare check")
-	driver._walker.global_position = Vector3(43,0,-30)
+	driver._walker.global_position = Vector3(Route.BECK_PORCH.x, 0, Route.BECK_PORCH.y)
 	shift.check_job()
 	check(shift.stage==2 and shift.hud.speaker.begins_with("MRS. BECK"),"Delivery leads to the right conversation")
 	shift.check_job()
 	check(shift.stage==2,"Repeating a knock doesn't duplicate the job")
-	driver._walker.global_position = Vector3(-12,0,38)
+	driver._walker.global_position = Vector3(Route.HOME_PORCH.x, 0, Route.HOME_PORCH.y)
 	shift.check_job()
 	check(shift.stage==3,"Only a visit home completes the return")
 	driver.cold=.99999
@@ -40,12 +41,12 @@ func _run() -> void:
 		await physics_frame
 	check(driver.cold<before_warmup,"The heater steadily restores warmth")
 	shift.stage = 0
-	for example: Array in [[Vector3(0,0,36),"co-op"],[Vector3(0,0,-80),"south"],[Vector3(18,0,-38),"Lower the blade"],[Vector3(-23,0,-25),"telephone poles"]]:
+	for example: Array in [[Vector3(0,0,36),"co-op"],[Vector3(0, 0, Route.BECK_Z - 40),"south"],[Vector3(18, 0, Route.BECK_Z),"Lower the blade"],[Vector3(-23,0,-25),"telephone poles"],[Vector3(0,0,Route.COOP_Z),"half a mile"]]:
 		driver._truck.global_position=example[0]
 		shift.directions()
 		check(shift.hud.subtitle.contains(example[1]),"Dispatch follows the truck's location at %s" % example[0])
 	shift.stage=2
-	driver._truck.global_position=Vector3(18,0,-38)
+	driver._truck.global_position=Vector3(18, 0, Route.BECK_Z)
 	shift.directions()
 	check(shift.hud.subtitle.contains("left"),"Return dispatch changes with job stage")
 	print("Shift rules: porch gates, cold, warmth, radio route branches; failures: ",failures)

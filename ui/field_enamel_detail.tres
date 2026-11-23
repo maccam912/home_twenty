@@ -1,0 +1,8 @@
+[gd_resource type="ShaderMaterial" format=3]
+
+[ext_resource type="Shader" path="res://ui/field_enamel_detail.gdshader" id="1"]
+
+[resource]
+; Run before the truck glass, spindrift and flakes composite over the enamel.
+render_priority = -120
+shader = ExtResource("1")

@@ -1,6 +1,7 @@
 extends Control
 
 signal menu_action(action: String)
+const Route = preload("res://world/route.gd")
 const TYPE := preload("res://ui/fonts/CourierPrime-Regular.ttf")
 const PENCIL := preload("res://ui/fonts/Kalam-Regular.ttf")
 const GAUGE := preload("res://ui/fonts/BarlowCondensed-Bold.ttf")
@@ -118,7 +119,7 @@ func _dispatch_slip() -> void:
 	_text(13,46,jobs[stage],PENCIL,25,PENCIL_INK)
 	var line := ["BECK  /  PROPANE","SOUTH PORCH","KITCHEN PORCH","BACK AT THE HOUSE"][stage] as String
 	if stage==0 and (area=="BECK LANE" or opened>0):
-		line = "%02d OF 36 M OPEN" % opened
+		line = "%d OF %d M OPEN" % [opened, Route.FULL_LANE]
 	_text(13,63,line,TYPE,12,Color("#3b524e"))
 	if stage==3:
 		_line(12,40,154,35,PENCIL_INK,1.4)
@@ -156,7 +157,7 @@ func _instruments() -> void:
 	_paper(PackedVector2Array([Vector2(114,513),Vector2(220,510),Vector2(221,532),Vector2(113,534)]),Color("#222d29"))
 	draw_circle(Vector2(123,523),3.4,Color("#d88d3b") if blade else Color("#627466"))
 	_text(132,528,"BLADE  "+("DOWN" if blade else "UP"),TYPE,12,MILK)
-	if area=="COUNTY Q" and opened==0 and stage==0 and mph<2:
+	if area in ["HOME PLACE", "COUNTY Q"] and opened==0 and stage==0 and mph<2:
 		_paper(PackedVector2Array([Vector2(261,510),Vector2(716,508),Vector2(713,532),Vector2(258,535)]),Color("#b4af94"))
 		_text(273,527,"WASD drive   B blade   E door   R mic   M book",TYPE,14,Color("#324440"))
 	_radio_face()

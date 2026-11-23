@@ -5,10 +5,8 @@ const Township = preload("res://world/township.gd")
 const PlowedSnow = preload("res://world/plowed_snow.gd")
 const Soundscape = preload("res://audio/soundscape.gd")
 const ShiftHUD = preload("res://ui/shift_hud.gd")
-const BECK_PORCH := Vector2(43,-30)
-const HOME_PORCH := Vector2(-12,38)
+const Route = preload("res://world/route.gd")
 const PORCH_REACH := 3.7
-const FULL_LANE := 36
 const PICTURE_LINES := 320.0
 var town: Township
 var driver
@@ -72,8 +70,9 @@ func _ready() -> void:
 	drive_camera = get_viewport().get_camera_3d()
 	add_child(title_camera)
 	title_camera.fov = 54
-	title_camera.position = Vector3(6.1,2.20,36.1)
-	title_camera.look_at(Vector3(2.25,1.36,45.0))
+	var yard := Transform3D(Basis.looking_at(driver.get_forward()), driver.get_truck_position())
+	title_camera.position = yard * Vector3(6.1, 2.2, -7.9)
+	title_camera.look_at(yard * Vector3(2.25, 1.36, 1.0))
 	title_camera.make_current()
 	_show_menu("title")
 
@@ -102,7 +101,7 @@ func begin_shift() -> void:
 		shift_started = true
 		if is_instance_valid(drive_camera):
 			drive_camera.make_current()
-		say("DEB   /   CB 19","There you are, hon. The Becks need their propane. Head north on Q. At their mailbox, hang a right and open the lane to the tank.",10.5)
+		say("DEB   /   CB 19","There you are, hon. The Becks need their propane. Left at the end of our drive, then a mile north on Q. Turn right at their box and plow through to the tank.",10.5)
 	_show_menu("drive")
 
 func _act_menu(action: String) -> void:
@@ -169,39 +168,48 @@ func say(who: String, what: String, seconds: float) -> void:
 	hud.queue_redraw()
 
 func _area(p: Vector2) -> String:
-	if p.x>4 and absf(p.y+38)<15:
+	if absf(p.y - Route.BECK_Z) < 14 and p.x > 4.3 and p.x < Route.TANK.x + 15:
 		return "BECK LANE"
-	if p.distance_to(HOME_PORCH)<12:
+	if absf(p.y - Route.HOME_Z) < 14 and p.x < -4.3 and p.x > Route.HOME_HOUSE.x - 10:
 		return "HOME PLACE"
-	if absf(p.x)<9:
+	if absf(p.x) < 9 and p.y >= Route.ROAD_NORTH_Z and p.y <= Route.ROAD_SOUTH_Z:
 		return "COUNTY Q"
 	return "OPEN COUNTRY"
 
 func directions() -> void:
 	var v: Vector3 = driver.get_truck_position()
 	var p := Vector2(v.x,v.z)
+	var area := _area(p)
 	var words: String
-	if stage>=2:
-		if p.distance_to(HOME_PORCH)<18:
-			words = "I can see your lights, hon. Park on the shoulder and come to the kitchen porch."
-		elif p.x>6 and absf(p.y+38)<20:
-			words = "Bring it back out to Q and take a left. Our place is on the west side. The kitchen light’s on."
-		elif p.y>43:
-			words = "Come north on Q. Look left for our kitchen light, just off the road."
+	if stage >= 2:
+		if area == "HOME PLACE":
+			words = "Come up to the house, hon. I left the kitchen light on for you."
+		elif area == "BECK LANE":
+			words = "Back out to Q and take a left. It’s a mile south to our drive. Look for our box on the right."
+		elif absf(p.y - Route.HOME_Z) < 12 and area == "COUNTY Q":
+			words = "That’s our turn. Take the west drive all the way up to the kitchen porch."
+		elif p.y > Route.HOME_Z:
+			words = "Come north on Q. Turn left at our box. The kitchen light’s on up the drive."
 		else:
-			words = "Go south on Q. Our farmhouse is just off the west shoulder. Come in for coffee."
-	elif stage==1:
+			words = "Follow Q south. Our mailbox is on the west side. Take the drive up to the house."
+	elif stage == 1:
 		words = "The Becks’ porch is on the south side of the lane, across from their tank. Park up and give them a knock."
-	elif p.x>5 and absf(p.y+38)<9:
+	elif area == "HOME PLACE":
+		words = "Come down our drive and turn left on Q. Go a mile north, past the co-op sign, to the Becks’ mailbox."
+	elif area == "BECK LANE":
 		words = "That’s their lane. Lower the blade and open one truck-width all the way from the mailbox to the tank."
-	elif absf(p.x)>10:
+	elif area == "OPEN COUNTRY":
 		words = "Look for the telephone poles on Q. The Becks’ turn is on the east side, by their mailbox."
-	elif absf(p.y+38)<9:
+	elif absf(p.y - Route.BECK_Z) < 12:
 		words = "You’re at their turn. The lane runs east here. Put the blade down and take it all the way to the tank."
-	elif p.y > -38:
-		words = "Take Q north past the co-op sign. Turn east at the Beck mailbox. The propane tank is at the far end."
-	else:
+	elif p.y < Route.BECK_Z:
 		words = "You’re past them. Come south on Q, then go left at the Beck mailbox."
+	elif absf(p.y - Route.COOP_Z) < 40:
+		words = "You’re by the co-op sign. Keep north. It’s a little under half a mile to their turn."
+	elif p.y < Route.COOP_Z:
+		words = "Keep north on Q. The next drive on the right is the Becks’. Look for the red flag on their box."
+	else:
+		words = "Head north on Q past the co-op sign. Take the east drive at the Beck mailbox."
 	say("DEB   /   CB 19",words,8)
 
 func check_job() -> void:
@@ -209,15 +217,15 @@ func check_job() -> void:
 	var p := Vector2(v.x,v.z)
 	if driver.in_cab:
 		say("IN THE CAB","Park and get out to knock at the porch.",3)
-	elif stage==1 and p.distance_to(BECK_PORCH)<=PORCH_REACH:
+	elif stage==1 and p.distance_to(Route.BECK_PORCH)<=PORCH_REACH:
 		stage = 2
 		say("MRS. BECK   /   AT THE DOOR","Oh, thank goodness. We were down to a quarter tank. Tell Deb I still have her pie plate.",8)
-	elif stage==2 and p.distance_to(HOME_PORCH)<=PORCH_REACH:
+	elif stage==2 and p.distance_to(Route.HOME_PORCH)<=PORCH_REACH:
 		stage = 3
 		say("DEB   /   AT HOME","There you are. Leave your boots by the stove, hon. I kept the coffee hot.",10)
-	elif p.distance_to(BECK_PORCH)<=PORCH_REACH:
+	elif p.distance_to(Route.BECK_PORCH)<=PORCH_REACH:
 		say("AT THE BECKS’ DOOR","You can still see the ridge from the door. The propane truck needs a clear run." if stage==0 else "Through the window, Mrs. Beck waves you on home.",5)
-	elif p.distance_to(HOME_PORCH)<=PORCH_REACH:
+	elif p.distance_to(Route.HOME_PORCH)<=PORCH_REACH:
 		say("DEB   /   AT HOME","Coffee’s hot whenever you want it. The Becks are counting on you." if stage<3 else "Sit a little. It can snow without us for a minute.",6)
 	else:
 		say("OUTSIDE","Get close enough to reach the porch door.",2.5)
@@ -228,7 +236,7 @@ func update_job_progress() -> void:
 		return
 	last_revision = snow.revision
 	hud.opened = snow.open_length()
-	if hud.opened>=FULL_LANE:
+	if hud.opened>=Route.FULL_LANE:
 		stage = 1
 		hud.stage = 1
 		if not mic_down:
@@ -274,8 +282,8 @@ func _physics_process(delta: float) -> void:
 	hud.cab = driver.in_cab
 	hud.blade = driver.blade_down
 	hud.prompt = ""
-	if not driver.in_cab and (pos.distance_to(BECK_PORCH)<=PORCH_REACH or pos.distance_to(HOME_PORCH)<=PORCH_REACH):
-		hud.prompt = "[X]  Knock at the porch" if stage!=2 or pos.distance_to(HOME_PORCH)>PORCH_REACH else "[X]  Join Deb for coffee"
+	if not driver.in_cab and (pos.distance_to(Route.BECK_PORCH)<=PORCH_REACH or pos.distance_to(Route.HOME_PORCH)<=PORCH_REACH):
+		hud.prompt = "[X]  Knock at the porch" if stage!=2 or pos.distance_to(Route.HOME_PORCH)>PORCH_REACH else "[X]  Join Deb for coffee"
 	elif not driver.in_cab and player.distance_to(driver.get_truck_position())<4:
 		hud.prompt = "[E]  Climb into the cab"
 	elif stage==0 and driver.in_cab and not driver.blade_down and hud.area=="BECK LANE":

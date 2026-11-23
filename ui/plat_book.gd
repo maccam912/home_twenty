@@ -1,6 +1,7 @@
 extends RefCounted
 
 ## Draws inside the caller's 960 × 540 HUD coordinate system.
+const Route = preload("res://world/route.gd")
 const LETTER := preload("res://ui/fonts/BarlowCondensed-Bold.ttf")
 const TYPE := preload("res://ui/fonts/CourierPrime-Regular.ttf")
 const HAND := preload("res://ui/fonts/Kalam-Regular.ttf")
@@ -125,36 +126,45 @@ func _plat() -> void:
 	_text(Vector2(71,247),"J. Mertens",TYPE,12,FADED)
 	_text(Vector2(70,344),"L. Zajac",TYPE,12,FADED)
 	_text(Vector2(389,141),"A. Nowak",TYPE,12,FADED)
-	_text(Vector2(421,260),"Beck family",TYPE,12,FADED)
+	_text(Vector2(406,262),"Beck family",TYPE,12,FADED)
 	_text(Vector2(316,330),"H. Lindquist",TYPE,12,FADED)
 	# The county right of way is double-ruled. Private spurs use a single line.
 	canvas.draw_rect(Rect2(244,111,7,300),Color("#b5a989"))
 	_line(Vector2(244,111),Vector2(244,411),CHARCOAL,1.4)
 	_line(Vector2(251,111),Vector2(251,411),CHARCOAL,1.4)
-	_line(Vector2(252,205),Vector2(356,205),CHARCOAL,1.8)
-	_line(Vector2(246,373),Vector2(207,373),CHARCOAL,1.6)
-	# Silo, barn, house and propane tank are recognizable in a small cartographic key.
-	canvas.draw_rect(Rect2(292,150,10,6),CHARCOAL)
-	canvas.draw_circle(Vector2(327,146),3.1,CHARCOAL)
-	_text(Vector2(271,137),"barn & silo",HAND,14,PENCIL)
-	canvas.draw_rect(Rect2(343,233,11,6),CHARCOAL)
-	canvas.draw_rect(Rect2(200,369,10,8),CHARCOAL)
-	_capsule(Vector2(351,189),8)
-	canvas.draw_rect(Rect2(263,282,8,4),CHARCOAL)
-	_line(Vector2(267,285),Vector2(267,290),CHARCOAL)
-	_text(Vector2(278,290),"co-op sign",HAND,16,PENCIL)
-	canvas.draw_rect(Rect2(263,213,3.5,3.5),RED)
-	_text(Vector2(265,195),"Beck lane",HAND,18,RED)
-	_text(Vector2(370,191),"propane tank",HAND,16,PENCIL)
-	_line(Vector2(358,190),Vector2(368,187),PENCIL)
-	_text(Vector2(369,233),"porch",HAND,17,PENCIL)
-	_line(Vector2(355,235),Vector2(367,230),PENCIL)
-	_text(Vector2(167,356),"our place",HAND,17,RED)
-	canvas.draw_arc(Vector2(206,372),11.5,-.25,5.92,23,Color(RED,.85),1.35,true)
-	_text(Vector2(266,227),"mailbox",HAND,14,RED)
-	# The red pencil hooks around the mailbox in the direction Deb gives over the CB.
-	_path([Vector2(239,291),Vector2(238,268),Vector2(239,234),Vector2(239,216),Vector2(243,210),Vector2(256,207),Vector2(287,207)],Color(RED,.80),1.55)
-	_path([Vector2(281,204),Vector2(288,207),Vector2(281,210)],RED,1.35)
+	var home_turn := _map_point(Vector2(0, Route.HOME_Z))
+	var beck_turn := _map_point(Vector2(0, Route.BECK_Z))
+	var home := _map_point(Route.HOME_PORCH)
+	var beck := _map_point(Route.BECK_PORCH)
+	var coop := _map_point(Vector2(9.3, Route.COOP_Z))
+	_line(home_turn, home, CHARCOAL, 1.6)
+	_line(beck_turn, Vector2(beck.x, beck_turn.y), CHARCOAL, 1.6)
+	canvas.draw_rect(Rect2(home - Vector2(5, 3), Vector2(6, 5)), CHARCOAL)
+	canvas.draw_rect(Rect2(beck, Vector2(5, 4)), CHARCOAL)
+	canvas.draw_circle(beck + Vector2(9, -7), 2.2, CHARCOAL)
+	_text(home + Vector2(-72, -7), "our place", HAND, 17, RED)
+	canvas.draw_arc(home, 10, -.25, 5.92, 23, Color(RED,.85), 1.35, true)
+	canvas.draw_rect(Rect2(coop + Vector2(4, -7), Vector2(7, 3)), CHARCOAL)
+	_line(coop + Vector2(7, -4), coop + Vector2(7, 1), CHARCOAL)
+	_text(coop + Vector2(17, 2), "co-op sign", HAND, 16, PENCIL)
+	_path([beck_turn+Vector2(-9,37), beck_turn+Vector2(-8,12), beck_turn+Vector2(-5,5), beck_turn+Vector2(10,1)], RED, 1.5)
+	_path([beck_turn+Vector2(5,-2), beck_turn+Vector2(11,1), beck_turn+Vector2(6,5)], RED, 1.3)
+
+	# Deb pencilled a larger plan beside the printed section so the unloading yard reads.
+	_path([beck+Vector2(13,0), Vector2(296,169), Vector2(319,178)], Color(RED,.60))
+	var inset := Rect2(319, 166, 202, 78)
+	canvas.draw_rect(inset, Color("#dfd4b6"))
+	canvas.draw_rect(inset, Color(RED,.56), false, 1.1)
+	_text(Vector2(330,185), "Beck lane", HAND, 20, RED)
+	_line(Vector2(334,193), Vector2(334,237), CHARCOAL, 1.5)
+	_line(Vector2(338,193), Vector2(338,237), CHARCOAL)
+	_line(Vector2(338,210), Vector2(451,210), CHARCOAL, 1.5)
+	_capsule(Vector2(450,201), 8)
+	canvas.draw_rect(Rect2(446,218,8,5), CHARCOAL)
+	canvas.draw_rect(Rect2(341,214,3,3), RED)
+	_text(Vector2(347,231), "mailbox", HAND, 15, RED)
+	_text(Vector2(461,205), "tank", HAND, 16, PENCIL)
+	_text(Vector2(461,227), "porch", HAND, 16, PENCIL)
 	_road_badge(Vector2(248,326))
 	_text(Vector2(478,367),"N",LETTER,15)
 	_path([Vector2(482,373),Vector2(476,393),Vector2(482,388),Vector2(487,393),Vector2(482,373)],CHARCOAL)
@@ -168,10 +178,13 @@ func _plat() -> void:
 		_line(Vector2(531,y),Vector2(535,y),FADED)
 	_text(Vector2(59,435),"COUNTY Q",LETTER,17)
 	_text(Vector2(133,435),"1838  Beck property",TYPE,13)
-	_text(Vector2(59,463),"North on Q, then east at their box.", HAND,23,RED)
+	_text(Vector2(59,463),"One mile north. East at their box.", HAND,23,RED)
 	_line(Vector2(60,470),Vector2(362,468),Color(RED,.48))
 	_text(Vector2(60,490),"PRIVATE LANES SHOWN BY SINGLE RULE",TYPE,10,FADED)
 
+
+func _map_point(world: Vector2) -> Vector2:
+	return Vector2(247.5, 373) + (world - Vector2(0, Route.HOME_Z)) * .128
 
 func _capsule(pos: Vector2, width: float) -> void:
 	canvas.draw_rect(Rect2(pos.x-width*.5,pos.y-2,width,4),CHARCOAL)
@@ -206,7 +219,7 @@ func _dispatch(stage: int, opened: int) -> void:
 	if stage >= 3:
 		_text(Vector2(615,400),"All home.  — Deb", HAND,25,RED)
 	elif opened > 0 and stage == 0:
-		_text(Vector2(615,400),"%d of 36 m open" % opened, HAND,22,RED)
+		_text(Vector2(615,400),"%d of %d m open" % [opened, Route.FULL_LANE], HAND,22,RED)
 	else:
 		_text(Vector2(615,400),"Call me on nineteen.", HAND,22,RED)
 	# An actual bent-wire paper clip catches both sheets at the upper right.

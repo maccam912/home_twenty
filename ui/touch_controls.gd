@@ -1,5 +1,6 @@
 extends Control
 
+const Route = preload("res://world/route.gd")
 const LETTERING := Color("#eee7d5")
 const RUBBER := Color("#292e2e")
 const RUBBER_RIB := Color("#535856")
@@ -54,7 +55,7 @@ func _sync() -> void:
 	var driver_position: Vector3 = shift.driver.get_driver_position()
 	var near: bool = not cab and driver_position.distance_to(shift.driver.get_truck_position()) <= 4.2
 	var position_xz := Vector2(driver_position.x, driver_position.z)
-	var porch: bool = not cab and (position_xz.distance_to(shift.BECK_PORCH) <= shift.PORCH_REACH or position_xz.distance_to(shift.HOME_PORCH) <= shift.PORCH_REACH)
+	var porch: bool = not cab and (position_xz.distance_to(Route.BECK_PORCH) <= shift.PORCH_REACH or position_xz.distance_to(Route.HOME_PORCH) <= shift.PORCH_REACH)
 	var safe := _safe_rect()
 	if safe != _safe or cab != _in_cab or blade != _blade_down or near != _near_truck or porch != _can_knock or _buttons.is_empty():
 		_safe = safe

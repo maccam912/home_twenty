@@ -1,5 +1,6 @@
 extends SceneTree
 
+const Route = preload("res://world/route.gd")
 const SHIFT = preload("res://game/shift.tscn")
 var shift
 var controls
@@ -115,7 +116,7 @@ func _door() -> void:
 	_expect(not shift.driver.in_cab and controls._buttons.has(&"interact") and not controls._buttons.has(&"blade"),"The open cab door should expose on-foot actions and hide the blade switch")
 	_expect(not controls._buttons.has(&"job"),"A player standing by the truck cannot knock on a distant porch")
 	# Stage a walker's arrival at the porch; the route smoke test covers the full journey there.
-	shift.driver._walker.global_position = Vector3(shift.BECK_PORCH.x,0,shift.BECK_PORCH.y)
+	shift.driver._walker.global_position = Vector3(Route.BECK_PORCH.x,0,Route.BECK_PORCH.y)
 	await _advance()
 	_expect(not controls._buttons.has(&"interact"),"The cab door action should disappear at the Becks’ porch")
 	await _tap(10,_button(&"job"))
