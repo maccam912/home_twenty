@@ -113,7 +113,18 @@ func shutdown() -> void:
 
 
 func _exit_tree() -> void:
+	if _players.is_empty() and not _wind_filter:
+		return
 	shutdown()
+	# A forced exit skips the window-close timer. Wait for two 512-frame
+	# mix blocks after stop() so Godot can retire the last MP3 playbacks.
+	var drained := AudioEffectCapture.new()
+	var slot := AudioServer.get_bus_effect_count(0)
+	AudioServer.add_bus_effect(0, drained, slot)
+	var deadline := Time.get_ticks_msec() + 300
+	while drained.get_frames_available() < 1024 and Time.get_ticks_msec() < deadline:
+		OS.delay_msec(2)
+	AudioServer.remove_bus_effect(0, slot)
 
 
 func _process(delta: float) -> void:
