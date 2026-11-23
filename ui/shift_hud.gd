@@ -15,8 +15,15 @@ const MAP_WIDTH := 960.0
 const MAP_HEIGHT := 540.0
 var mode := "title"
 var touch_enabled := false
-var stage := 0
 var opened := 0
+var target_length := 0
+var work_order: Dictionary = {}:
+	set(value):
+		if book != null and work_order.get("site") != value.get("site"):
+			book.open_order(value)
+		work_order = value
+		queue_redraw()
+var completed_jobs := 0
 var cab := true
 var blade := false
 var mph := 0
@@ -35,6 +42,7 @@ func _ready() -> void:
 	process_mode = Node.PROCESS_MODE_ALWAYS
 	mouse_filter = Control.MOUSE_FILTER_STOP
 	book = load("res://ui/plat_book.gd").new()
+	book.open_order(work_order)
 	ignition = load("res://ui/ignition_menu.gd").new()
 	var overlay := ColorRect.new()
 	overlay.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
@@ -60,6 +68,8 @@ func _gui_input(event:InputEvent) -> void:
 		hover = (event.position-_origin())/_scale_factor()
 		press = event.pressed and not event.canceled
 	elif event is InputEventMouse:
+		if event.device == InputEvent.DEVICE_ID_EMULATION:
+			return
 		hover = (event.position-_origin())/_scale_factor()
 		press = event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT and event.pressed
 	else:
@@ -71,7 +81,23 @@ func _gui_input(event:InputEvent) -> void:
 		var choice: String = book.hit(hover) if mode=="book" else ignition.hit_test(hover)
 		if not choice.is_empty():
 			accept_event()
-			menu_action.emit(choice)
+			if choice == "sheet":
+				book.next_sheet(work_order)
+			elif choice != "browse":
+				menu_action.emit(choice)
+
+func _input(event: InputEvent) -> void:
+	if mode != "book" or not event is InputEventKey or not event.pressed or event.echo:
+		return
+	match event.keycode:
+		KEY_V: book.next_sheet(work_order)
+		KEY_LEFT: book.browse(Vector2i.LEFT)
+		KEY_RIGHT: book.browse(Vector2i.RIGHT)
+		KEY_UP: book.browse(Vector2i.UP)
+		KEY_DOWN: book.browse(Vector2i.DOWN)
+		_: return
+	queue_redraw()
+	get_viewport().set_input_as_handled()
 
 func _text(x:float,y:float,value:String,font:Font,point:int,color:Color) -> void:
 	draw_string(font,Vector2(x,y),value,HORIZONTAL_ALIGNMENT_LEFT,-1,point,color)
@@ -90,7 +116,7 @@ func _draw() -> void:
 	if mode=="title" or mode=="pause":
 		ignition.draw(self,mode,hover,touch_enabled)
 	elif mode=="book":
-		book.draw(self,stage,opened,touch_enabled,hover)
+		book.draw(self)
 	else:
 		_dispatch_slip()
 		if cab:
@@ -102,6 +128,8 @@ func _draw() -> void:
 			_caption(prompt,Vector2(480,y),TYPE,15,Color("#ffdfab"),4)
 
 func _dispatch_slip() -> void:
+	if work_order.is_empty():
+		return
 	# A torn copy of Deb's work order tucked under the edge of the visor.
 	var base := Vector2(22,10)
 	draw_set_transform(_origin()+base*_scale_factor(),-.032,Vector2.ONE*_scale_factor())
@@ -114,22 +142,27 @@ func _dispatch_slip() -> void:
 	_rect(6,2,1,64,Color("#b6af98"))
 	_line(12,24,224,24,BLUE_RULE,.8)
 	_line(12,49,223,49,BLUE_RULE,.8)
-	_text(13,19,"1838 COUNTY Q" if stage<2 else "1816 COUNTY Q",TYPE,13,RED_INK)
-	_text(162,18,"DEB’S COPY",GAUGE,11,Color("#686e60"))
-	var jobs := ["Open tank lane","Knock at the Becks’","Home for coffee","Home for coffee"]
-	_text(13,46,jobs[stage],PENCIL,25,PENCIL_INK)
-	var line := ["BECK  /  PROPANE","SOUTH PORCH","KITCHEN PORCH","BACK AT THE HOUSE"][stage] as String
-	if stage==0 and (area=="BECK LANE" or opened>0):
-		line = "%d OF %d M OPEN" % [opened, Route.FULL_LANE]
-	_text(13,63,line,TYPE,12,Color("#3b524e"))
-	if stage==3:
-		_line(12,40,154,35,PENCIL_INK,1.4)
+	var site: Dictionary = Route.SITES[work_order.site]
+	var detail: String = site.road.to_upper()
+	if work_order.legs > 1:
+		detail += "   ·   STOP %d/%d" % [work_order.leg, work_order.legs]
+	if target_length > 0:
+		detail += "   %d/%d M" % [opened, target_length]
+	_fit(13,19,site.name.to_upper(),TYPE,13,140,RED_INK)
+	_text(162,18,"CALL %02d" % (completed_jobs + 1),GAUGE,12,Color("#686e60"))
+	_fit(13,46,work_order.title,PENCIL,25,207,PENCIL_INK)
+	_fit(13,63,detail,TYPE,12,207,Color("#3b524e"))
 	# Fold, crimp and the dark wire of a spring clip.
 	_paper(PackedVector2Array([Vector2(218,1),Vector2(234,1),Vector2(233,16)]),Color("#bcb49a"))
 	_line(79,-5,99,-4,Color("#333d3b"),4.0)
 	_line(77,-4,79,5,Color("#606767"),2)
 	_line(79,5,97,5,Color("#858a80"),1.0)
 	draw_set_transform(_origin(),0,Vector2.ONE*_scale_factor())
+
+func _fit(x: float, y: float, value: String, font: Font, point: int, width: float, color: Color) -> void:
+	while point > 11 and font.get_string_size(value, HORIZONTAL_ALIGNMENT_LEFT, -1, point).x > width:
+		point -= 1
+	draw_string(font, Vector2(x, y), value, HORIZONTAL_ALIGNMENT_LEFT, width, point, color)
 
 func _instruments() -> void:
 	if touch_enabled:
@@ -159,7 +192,7 @@ func _instruments() -> void:
 	_paper(PackedVector2Array([Vector2(114,513),Vector2(220,510),Vector2(221,532),Vector2(113,534)]),Color("#222d29"))
 	draw_circle(Vector2(123,523),3.4,Color("#d88d3b") if blade else Color("#627466"))
 	_text(132,528,"BLADE  "+("DOWN" if blade else "UP"),TYPE,12,MILK)
-	if area in ["HOME PLACE", "COUNTY Q"] and opened==0 and stage==0 and mph<2:
+	if area in ["HOME PLACE", "COUNTY Q"] and completed_jobs==0 and opened==0 and mph<2:
 		_paper(PackedVector2Array([Vector2(261,510),Vector2(716,508),Vector2(713,532),Vector2(258,535)]),Color("#b4af94"))
 		_text(273,527,"WASD drive   B blade   E door   R mic   M book",TYPE,14,Color("#324440"))
 	_radio_face()

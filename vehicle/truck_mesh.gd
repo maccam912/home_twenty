@@ -13,6 +13,7 @@ var _wheels: Array[Node3D] = []
 var _knuckles: Array[Node3D] = []
 var _plow: Node3D
 var _wheel: Node3D
+var _cargo: Node3D
 var _shovel: Node3D
 var _shovel_rest: Transform3D
 var _shovel_load: MeshInstance3D
@@ -230,7 +231,7 @@ func _dial_text(text: String, pos: Vector3, size: float) -> void:
 
 
 func _cab_interior() -> void:
-	_box(self, Vector3(0, 1.005, -0.19), Vector3(1.78, 0.19, 0.62), "cloth")
+	_box(self, Vector3(0, 1.33, -0.19), Vector3(1.78, 0.135, 0.62), "cloth")
 	var back := _box(self, Vector3(0, 1.31, 0.18), Vector3(1.78, 0.61, 0.17), "cloth")
 	back.rotation.x = 0.10
 	for x: float in [-0.51, 0.51]:
@@ -336,6 +337,90 @@ func _bed() -> void:
 	scoop.rings = 3
 	_shovel_load = _piece(_shovel, scoop, Vector3(0, 0.035, -1.56), "snow")
 	_shovel_load.hide()
+
+
+# Stow handheld items within reach and heavier loads behind the ballast, clear of the shovel.
+func set_cargo(item: String) -> void:
+	if is_instance_valid(_cargo):
+		_cargo.free()
+		_cargo = null
+	if item.is_empty():
+		return
+	_cargo = _joint(self, Vector3(-.23, 1.045, 2.19))
+	_cargo.name = "Cargo_" + item
+	match item:
+		"ticket":
+			# A yellow carbon copy, a narrow weight slip and a galvanized spring clip.
+			_cargo.position = Vector3(.18, 1.423, -.97)
+			_cargo.rotation.y = .18
+			_box(_cargo, Vector3.ZERO, Vector3(.221, .012, .31), "cloth")
+			_box(_cargo, Vector3(.013, .009, .006), Vector3(.203, .005, .288), "sack")
+			_box(_cargo, Vector3(-.014, .015, .018), Vector3(.14, .005, .247), "paper")
+			for z: float in [-.05, -.015, .02, .055, .09]:
+				_box(_cargo, Vector3(-.014, .019, z), Vector3(.11, .002, .003), "mapink")
+			_box(_cargo, Vector3(0, .024, -.108), Vector3(.106, .015, .029), "rim")
+		"grit":
+			# An upright canvas sack with a gathered neck, cinch and hanging weigh tag.
+			var sack := SphereMesh.new()
+			sack.radial_segments = 10
+			sack.rings = 5
+			_piece(_cargo, sack, Vector3(0, .23, 0), "mapink").scale = Vector3(.49, .55, .41)
+			_cyl(_cargo, Vector3(0, .46, 0), .074, .12, "cloth", 8)
+			_cyl(_cargo, Vector3(0, .467, 0), .079, .023, "paper", 8)
+			_bar(_cargo, Vector3(0, .466, .074), Vector3(.045, .392, .164), .01, .01, "cloth")
+			_box(_cargo, Vector3(.045, .37, .181), Vector3(.074, .054, .009), "paper").rotation.x = -.58
+		"coffee":
+			_cargo.position = Vector3(.46, 1.398, -.36)
+			_cargo.rotation.y = 1.07
+			_cyl(_cargo, Vector3(0, .202, 0), .116, .397, "mapink", 12)
+			for band: float in [.097, .291]:
+				_cyl(_cargo, Vector3(0, band, 0), .117, .021, "oxblood")
+			_cyl(_cargo, Vector3(0, .025, 0), .12, .043, "rim")
+			_cyl(_cargo, Vector3(0, .386, 0), .112, .044, "rim")
+			_cyl(_cargo, Vector3(0, .44, 0), .08, .072, "steel")
+			_box(_cargo, Vector3(-.162, .222, 0), Vector3(.032, .19, .043), "black")
+			for level: float in [.132, .312]:
+				_box(_cargo, Vector3(-.128, level, 0), Vector3(.08, .031, .047), "black")
+		"flares":
+			_cargo.rotation.y = -.16
+			_box(_cargo, Vector3(0, .12, 0), Vector3(.43, .24, .23), "orange")
+			_box(_cargo, Vector3(0, .249, 0), Vector3(.45, .025, .249), "oxblood")
+			_box(_cargo, Vector3(0, .318, 0), Vector3(.147, .018, .021), "black")
+			for x: float in [-.065, .065]:
+				_box(_cargo, Vector3(x, .286, 0), Vector3(.014, .054, .019), "steel")
+				_box(_cargo, Vector3(x * 2, .209, .119), Vector3(.022, .071, .012), "rim")
+			_cargo_label("FLARES", Vector3(0, .12, .117), .05)
+		"mitts":
+			_cargo.position = Vector3(.52, 1.398, -.27)
+			_cargo.rotation.y = -.19
+			_box(_cargo, Vector3(0, .093, 0), Vector3(.278, .185, .155), "sack")
+			_box(_cargo, Vector3(0, .164, 0), Vector3(.29, .061, .17), "paper")
+			var wool := SphereMesh.new()
+			wool.radial_segments = 8
+			wool.rings = 4
+			for x: float in [-.061, .056]:
+				var glove := _joint(_cargo, Vector3(x, .221, 0))
+				glove.rotation.z = x * 2.4
+				_piece(glove, wool, Vector3.ZERO, "cloth").scale = Vector3(.092, .119, .061)
+				_piece(glove, wool, Vector3(x * .6, -.023, .012), "cloth").scale = Vector3(.048, .066, .036)
+			_box(_cargo, Vector3(0, .194, 0), Vector3(.286, .011, .018), "mapink")
+			_cargo_label("DRY MITTS", Vector3(0, .099, .079), .022)
+		_:
+			push_error("Unknown truck cargo: " + item)
+			_cargo.free()
+			_cargo = null
+
+
+func _cargo_label(words: String, at: Vector3, height: float) -> void:
+	var label := Label3D.new()
+	label.text = words
+	label.font = preload("res://ui/fonts/BarlowCondensed-Bold.ttf")
+	label.font_size = 32
+	label.pixel_size = height / label.font_size
+	label.outline_size = 0
+	label.modulate = Color("#312e24")
+	label.position = at
+	_cargo.add_child(label)
 
 
 func set_shovel_stroke(camera: Camera3D, phase: float) -> void:

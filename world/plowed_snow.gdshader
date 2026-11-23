@@ -2,7 +2,8 @@ shader_type spatial;
 render_mode cull_back, diffuse_lambert, specular_disabled;
 #include "res://world/snow_surface.gdshaderinc"
 
-uniform vec4 footprints[5];
+uniform vec4 footprints[16];
+uniform int strip_count;
 uniform sampler2D snow_map : filter_linear, repeat_disable;
 uniform vec2 origin;
 uniform vec2 extent;
@@ -13,7 +14,7 @@ varying float road_weight;
 float shoulder_weight(vec2 p) {
 	float coverage = 0.;
 	float width = .94 + .18*sin(p.x*.72+p.y*.81) + .15*sin(p.x*1.43-p.y*.33);
-	for (int i=0; i<footprints.length(); i++) {
+	for (int i=0; i<strip_count; i++) {
 		vec2 inset = min(p - footprints[i].xy, footprints[i].zw - p);
 		vec2 blend = smoothstep(vec2(-width), vec2(width), inset);
 		coverage += blend.x * blend.y;

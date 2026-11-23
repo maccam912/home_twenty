@@ -1,6 +1,5 @@
 extends Control
 
-const Route = preload("res://world/route.gd")
 const LETTERING := Color("#eee7d5")
 const RUBBER := Color("#292e2e")
 const RUBBER_RIB := Color("#535856")
@@ -23,7 +22,7 @@ var _gameplay := false
 var _in_cab := true
 var _blade_down := false
 var _near_truck := false
-var _can_knock := false
+var _job_label := ""
 var _can_dig := false
 var _unit := 1.0
 var _safe := Rect2()
@@ -55,16 +54,15 @@ func _sync() -> void:
 	var blade: bool = shift.driver.blade_down
 	var driver_position: Vector3 = shift.driver.get_driver_position()
 	var near: bool = not cab and driver_position.distance_to(shift.driver.get_truck_position()) <= 4.2
-	var position_xz := Vector2(driver_position.x, driver_position.z)
-	var porch: bool = not cab and (position_xz.distance_to(Route.BECK_PORCH) <= shift.PORCH_REACH or position_xz.distance_to(Route.HOME_PORCH) <= shift.PORCH_REACH)
+	var action_text: String = "" if cab else shift.field_action_label().to_upper()
 	var dig: bool = not cab and shift.driver.can_dig_out()
 	var safe := _safe_rect()
-	if safe != _safe or cab != _in_cab or blade != _blade_down or near != _near_truck or porch != _can_knock or dig != _can_dig or _buttons.is_empty():
+	if safe != _safe or cab != _in_cab or blade != _blade_down or near != _near_truck or action_text != _job_label or dig != _can_dig or _buttons.is_empty():
 		_safe = safe
 		_in_cab = cab
 		_blade_down = blade
 		_near_truck = near
-		_can_knock = porch
+		_job_label = action_text
 		_can_dig = dig
 		_layout()
 		for id in _held.keys():
@@ -109,11 +107,11 @@ func _layout() -> void:
 			_place(&"interact", Rect2(256, row_y, 112, 78))
 		if _can_dig:
 			_place(&"unstick", Rect2(span.x - 374, row_y, 112, 78))
-		if _can_knock:
-			var knock := Rect2(span.x - 374, row_y, 112, 78)
+		if not _job_label.is_empty():
+			var work := Rect2(span.x - 374, row_y, 112, 78)
 			if _can_dig:
-				knock = Rect2(span.x - 318, 14, 112, 69)
-			_place(&"job", knock)
+				work = Rect2(span.x - 318, 14, 112, 69)
+			_place(&"job", work)
 	_place(&"plat", Rect2(span.x - 198, 14, 94, 69))
 	_place(&"pause_shift", Rect2(span.x - 96, 14, 84, 69))
 
@@ -373,7 +371,7 @@ func _push_key(r: Rect2, action: StringName, down: bool) -> void:
 			draw_line(p + Vector2(-5,0),p + Vector2(6,0),ink,1)
 			draw_line(p + Vector2(2,2),p + Vector2(5,2),ink,1)
 		&"job":
-			wording = "KNOCK"
+			wording = _job_label
 			draw_rect(Rect2(p - Vector2(4,6),Vector2(8,12)),ink,false,1.4)
 			draw_circle(p + Vector2(2,1),0.9,ink)
 		&"unstick":
@@ -381,7 +379,10 @@ func _push_key(r: Rect2, action: StringName, down: bool) -> void:
 			draw_line(p + Vector2(-3,3),p + Vector2(5,-5),ink,2,true)
 			draw_polyline(PackedVector2Array([p + Vector2(4,-6),p + Vector2(6,-8),p + Vector2(9,-5),p + Vector2(7,-3),p + Vector2(4,-6)]),ink,1.5,true)
 			draw_colored_polygon(PackedVector2Array([p + Vector2(-7,0),p + Vector2(0,7),p + Vector2(-7,10),p + Vector2(-10,7)]),ink)
-	_label(r,wording,18,r.end.y - 6,LETTERING)
+	var point := 18
+	while point > 11 and _font.get_string_size(wording, HORIZONTAL_ALIGNMENT_LEFT, -1, point).x > r.size.x - 6:
+		point -= 1
+	_label(r,wording,point,r.end.y - 6,LETTERING)
 
 
 func _handset(r: Rect2, down: bool) -> void:

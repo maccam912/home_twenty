@@ -3,7 +3,10 @@ extends StaticBody3D
 const Route = preload("res://world/route.gd")
 const ROAD_EDGE := 4.3
 const OUTER_EDGE := 15.0
-const FIELD_EDGE := 1700.0
+# The hand-sampled drainage profile belongs to the original maintained section of Q.
+# The outer survey roads cross level, snow-covered fields.
+const DITCH_NORTH := -2200.0
+const DITCH_SOUTH := 200.0
 const ROW_SPACING := 2.0
 const CHUNK_LENGTH := 96.0
 
@@ -11,11 +14,14 @@ const CHUNK_LENGTH := 96.0
 # Metres relative to the crown of Q. The leeward pockets hold more drifted snow.
 static func height_at(x: float, z: float) -> float:
 	var distance := absf(x)
-	if distance <= ROAD_EDGE or distance >= OUTER_EDGE or z <= Route.ROAD_NORTH_Z or z >= Route.ROAD_SOUTH_Z:
+	if distance <= ROAD_EDGE or distance >= OUTER_EDGE or z <= DITCH_NORTH or z >= DITCH_SOUTH:
 		return 0.0
-	var entrance := Route.HOME_Z if x < 0 else Route.BECK_Z
-	var cut := smoothstep(5.0, 10.5, absf(z - entrance))
-	cut *= smoothstep(0.0, 10.0, minf(z - Route.ROAD_NORTH_Z, Route.ROAD_SOUTH_Z - z))
+	var distance_to_turn := absf(z - Route.HOME_Z)
+	if x > 0:
+		distance_to_turn = minf(absf(z - Route.BECK_Z), absf(z - Route.SITES.quarry.mouth.y))
+		distance_to_turn = minf(distance_to_turn, minf(absf(z - Route.ROADS[1].a.y), absf(z - Route.ROADS[3].a.y)))
+	var cut := smoothstep(5.0, 10.5, distance_to_turn)
+	cut *= smoothstep(0.0, 10.0, minf(z - DITCH_NORTH, DITCH_SOUTH - z))
 	var station := z * .01 + (19.0 if x < 0 else 0.0)
 	var spill := .52 * sin(station * 7.1) + .24 * sin(station * 18.3 + sin(station * 3.2))
 	var toe := 8.7 + .62 * sin(station * 2.1) + spill * .6
@@ -36,20 +42,25 @@ func build(snow: Material) -> void:
 	name = "SnowGround"
 	collision_layer = 2
 	collision_mask = 0
-	var columns := PackedFloat32Array([-FIELD_EDGE])
+	# Four broad flats surround the closely sampled core. They share exact edges
+	# with the ditch mesh; neither ground nor collision needs to grow per metre.
+	var fields := Route.COUNTY_BOUNDS.grow(850.0)
+	_add_section(PackedFloat32Array([fields.position.x,-OUTER_EDGE]), fields.position.y, fields.end.y, 1, snow)
+	_add_section(PackedFloat32Array([OUTER_EDGE,fields.end.x]), fields.position.y, fields.end.y, 1, snow)
+	var center := PackedFloat32Array([-OUTER_EDGE,OUTER_EDGE])
+	_add_section(center, fields.position.y, DITCH_NORTH, 1, snow)
+	_add_section(center, DITCH_SOUTH, fields.end.y, 1, snow)
+	var columns := PackedFloat32Array()
 	# Both swales need closely spaced samples. The road and distant fields are level.
 	for side in [-1, 1]:
 		for i in range(23):
 			var t: float = i / 22.0 if side > 0 else 1.0 - i / 22.0
 			columns.append(side * lerpf(ROAD_EDGE, OUTER_EDGE, t))
-	columns.append(FIELD_EDGE)
-	var z := Route.ROAD_NORTH_Z
-	_add_section(columns, z - 1200.0, z, 1, snow)
-	while z < Route.ROAD_SOUTH_Z:
-		var end := minf(z + CHUNK_LENGTH, Route.ROAD_SOUTH_Z)
+	var z := DITCH_NORTH
+	while z < DITCH_SOUTH:
+		var end := minf(z + CHUNK_LENGTH, DITCH_SOUTH)
 		_add_section(columns, z, end, ceili((end - z) / ROW_SPACING), snow)
 		z = end
-	_add_section(columns, z, z + 1200.0, 1, snow)
 
 
 func _add_section(columns: PackedFloat32Array, start: float, end: float, rows: int, snow: Material) -> void:

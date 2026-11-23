@@ -71,14 +71,18 @@ func _check_foliage(town: Node3D) -> void:
 	expect(clear > 100 and opaque > 100 and snowy > 12,"Bough texture lost its open gaps or snow dusting")
 
 func _check_stands(town: Node3D) -> void:
-	var bough_batches := 0
+	var forms := {}
+	var cells := {}
 	var count := 0
 	for node in town.get_children():
 		if node is MultiMeshInstance3D and node.material_override == town.mats.spruce_needles:
-			bough_batches += 1
+			forms[node.multimesh.mesh] = true
+			cells[node.position] = true
+			var bounds: AABB = node.get_aabb()
+			expect(maxf(bounds.size.x,bounds.size.z) < town.SCENERY_CELL + 50, "A distant tree should not keep a township-wide batch visible")
 			count += node.multimesh.instance_count
-	expect(bough_batches >= 3 and bough_batches <= 6, "Spruce forms should be shared, instanced batches")
-	expect(count > 30 and count > bough_batches*4, "The field stands are missing or lost instancing")
+	expect(forms.size() >= 3 and forms.size() <= 6, "Spruce forms should be shared, instanced batches")
+	expect(count > 30 and cells.size() > 4, "The field stands are missing or lost instancing")
 
 func _check_clearance(town: Node3D) -> void:
 	var space := town.get_world_3d().direct_space_state

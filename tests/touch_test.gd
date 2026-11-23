@@ -67,6 +67,12 @@ func _run() -> void:
 	_expect(controls!=null,"Touch suite requires the --touch-ui game argument")
 	if controls!=null:
 		_expect(not controls.visible,"Title screen must leave the touch overlay hidden")
+		await _tap(12,_hud_point(shift.hud.ignition.PLAT.get_center()))
+		var book = shift.hud.book
+		var southeast: Vector2 = book.PLATE.end - Vector2(20,20)
+		await _tap(13,_hud_point(southeast))
+		_expect(book.page == "section" and book.cell_name(book.section) == "D4","The county index opens distant sections even before dispatch")
+		await _tap(14,_hud_point(book.CLOSE.get_center()))
 		await _tap(0,_hud_point(shift.hud.ignition.START.get_center()))
 		_expect(controls.visible and shift.mode=="drive","Tapping the ignition must open the working controls")
 		await _driving()
@@ -89,7 +95,7 @@ func _check_layout(screen: Vector2, safe: Rect2) -> void:
 	var layout := TouchControls.new()
 	layout._safe = safe
 	layout._near_truck = true
-	layout._can_knock = true
+	layout._job_label = "TAKE TICKET"
 	layout._can_dig = true
 	var hud_scale := minf(screen.x / 960.0, screen.y / 540.0)
 	var origin := (screen - Vector2(960, 540) * hud_scale) * 0.5
@@ -130,7 +136,7 @@ func _driving() -> void:
 	await _advance()
 	_expect(shift.mic_down and shift.hud.subtitle.is_empty(),"Holding the radio mic must mute incoming instructions")
 	_finger(4,_button(&"dispatch"),false)
-	_expect(not shift.mic_down and shift.hud.subtitle.contains("Beck"),"Releasing the mic in the cab must receive the current route")
+	_expect(not shift.mic_down and shift.hud.subtitle.contains(Route.SITES[shift.dispatch.job.site].name),"Releasing the mic in the cab must receive the current route")
 	await _tap(5,_button(&"blade"))
 	_expect(shift.driver.blade_down,"A tap on the plow rocker must change the physical blade")
 	# The original throttle finger is deliberately still down when the map opens.
@@ -140,14 +146,38 @@ func _menus() -> void:
 	await _tap(7,_button(&"plat"))
 	_expect(shift.mode=="book" and not controls.visible,"The map should replace the driving controls")
 	_expect(not Input.is_action_pressed("accelerate") and not Input.is_action_pressed("dispatch") and not shift.mic_down,"Opening a menu must release an active pedal and CB mic")
+	var book = shift.hud.book
+	var target: Vector2i = book.cell_for(Route.SITES[shift.dispatch.job.site].yard)
+	_expect(book.page == "county" and book.section == target, "Opening a new call's plat selects its part of the county")
+	await _tap(8,_hud_point(book.SHEET.get_center()))
+	_expect(book.page == "section" and book.section == target, "The paper tab opens the property directory around the assignment")
+	await _tap(8,_hud_point(book.SHEET.get_center()))
+	_expect(book.page == "yard" and shift.mode=="book", "Tapping Yard detail opens the current stop's driveway plan")
+	await _tap(8,_hud_point(book.SHEET.get_center()))
+	_expect(book.page == "county", "Tapping County map restores the county index")
+	await _tap(8,_hud_point(book.PLATE.position + Vector2(20,20)))
+	_expect(book.page == "section" and book.section == Vector2i.ZERO, "The northwest square opens sheet A1")
+	for code in [KEY_RIGHT, KEY_DOWN]:
+		_book_key(code)
+	_expect(book.section == Vector2i.ONE, "Arrow keys browse adjacent printed sheets")
+	_book_key(KEY_V)
+	_expect(book.page == ("yard" if book.has_assigned_yard(shift.dispatch.job) else "county"), "V turns the same paper tab as a tap")
 	await _tap(8,_hud_point(shift.hud.book.CLOSE.get_center()))
 	_expect(shift.mode=="drive" and controls.visible,"The plat’s own close tab must restore the route")
 	_expect(not Input.is_action_pressed("accelerate"),"Closing the book must not reapply the interrupted pedal")
 
+func _book_key(code: Key) -> void:
+	for down: bool in [true,false]:
+		var key := InputEventKey.new()
+		key.keycode = code
+		key.physical_keycode = code
+		key.pressed = down
+		_send(key)
+
 func _door() -> void:
 	await _tap(9,_button(&"interact"))
 	_expect(not shift.driver.in_cab and controls._buttons.has(&"interact") and not controls._buttons.has(&"blade"),"The open cab door should expose on-foot actions and hide the blade switch")
-	_expect(not controls._buttons.has(&"job"),"A player standing by the truck cannot knock on a distant porch")
+	_expect(not controls._buttons.has(&"job"),"The job button stays hidden away from the assigned stop")
 	_expect(not controls._buttons.has(&"unstick"),"A free truck has no shovel control")
 	var start: Vector3 = shift.driver.get_driver_position()
 	var yaw: float = shift.driver._walk_yaw
@@ -171,11 +201,17 @@ func _door() -> void:
 	_expect(not shift.driver.stuck and not controls._buttons.has(&"unstick"),"Holding SHOVEL at a buried wheel must free the truck and dismiss the button")
 	_expect(not Input.is_action_pressed("unstick"),"Finishing the dig must release the shovel action")
 	_finger(3,dig,false)
-	# Stage a walker's arrival at the porch; the route smoke test covers the full journey there.
-	shift.driver._walker.global_position = Vector3(Route.BECK_PORCH.x,0,Route.BECK_PORCH.y)
+	# Stage the normal outdoor interaction after exercising the walking and recovery controls.
+	var order: Dictionary = shift.dispatch.job
+	var stop: Vector2 = Route.SITES[order.site].stop
+	shift.driver._walker.global_position = Vector3(stop.x,0,stop.y)
 	await _advance()
-	_expect(not controls._buttons.has(&"interact"),"The cab door action should disappear at the Becks’ porch")
+	_expect(not controls._buttons.has(&"interact"),"The door action disappears when the driver leaves the truck")
+	_expect(controls._job_label == order.action.to_upper(),"The field key names the assigned outdoor work")
 	await _tap(10,_button(&"job"))
-	_expect(shift.stage==0 and shift.hud.speaker.contains("BECK"),"An early porch knock must receive the Becks’ contextual reply and preserve the unpaid job")
+	if order.kind in ["plow", "windrow"]:
+		_expect(shift.dispatch.job == order and shift.hud.opened < shift.hud.target_length, "Checking unfinished plowing keeps the work order open")
+	else:
+		_expect(shift.dispatch.job != order and shift.hud.speaker == order.speaker, "Tapping the field action advances the stop and gives a response")
 	await _tap(11,_button(&"pause_shift"))
 	_expect(shift.mode=="pause" and not controls.visible,"Pause must release and hide on-foot controls")

@@ -8,31 +8,48 @@ func _run() -> void:
 	root.add_child(shift)
 	current_scene = shift
 	await process_frame
+	# Use a known opening deal to exercise a recurrent loading-bay contract.
+	shift.dispatch.rng.seed = 218
 	shift.begin_shift()
 	var driver = shift.driver
-	check(absf((Route.HOME_Z - Route.BECK_Z) - 1609.344) < 80, "The mile in Deb’s directions agrees with the road distance")
-	# An unreported job must never silently complete simply because a porch is nearby.
-	driver._truck.global_position = Vector3(Route.BECK_PARK.x, 0, Route.BECK_Z)
+	var order: Dictionary = shift.dispatch.job
+	check(order.kind == "windrow", "Test deal starts with a loading-bay call")
+	var site: Dictionary = Route.SITES[order.site]
+	var path := Route.pile_path(order.site)
+	var bay = shift.loading_bays[order.site]
+	var truck_at: Vector2 = path[0].lerp(path[1], .5)
+	driver._truck.global_position = Vector3(truck_at.x, 0, truck_at.y)
 	shift.check_job()
-	check(shift.stage==0 and shift.hud.speaker=="IN THE CAB","House interactions require getting out")
+	check(shift.dispatch.completed == 0 and shift.hud.speaker == "IN THE CAB", "Handoffs require getting out")
 	await _tap(KEY_E)
-	driver._walker.global_position = Vector3(Route.BECK_PORCH.x, 0, Route.BECK_PORCH.y)
-	shift.check_job()
-	check(shift.stage==0 and shift.hud.speaker=="AT THE BECKS’ DOOR","Mrs. Beck checks lane completion")
 	driver._walker.global_position = Vector3(Route.HOME_PORCH.x, 0, Route.HOME_PORCH.y)
 	shift.check_job()
-	check(shift.stage==0 and shift.hud.speaker.begins_with("DEB"),"Home stays visitable before the first contract is done")
-	shift.stage = 1
+	check(shift.dispatch.job == order and shift.field_action_label().is_empty(), "Visiting home has no effect on the active job")
+	driver._walker.global_position = Vector3(site.stop.x, 0, site.stop.y)
 	shift.check_job()
-	check(shift.stage==1,"The wrong porch cannot advance the welfare check")
-	driver._walker.global_position = Vector3(Route.BECK_PORCH.x, 0, Route.BECK_PORCH.y)
+	check(shift.hud.subtitle.contains("orange stakes") and shift.dispatch.completed == 0, "Checking in before clearing the marked bay leaves the order open")
+	# A partial pass at the far end cannot complete the assigned ridge. Clearing
+	# the rest joins both pieces. The next drop of snow leaves the base lane alone.
+	var heading := path[0].direction_to(path[1])
+	var forward := Vector3(heading.x, 0, heading.y)
+	for i in range(32, 65):
+		var at := path[0] + heading * i * .125
+		bay.cut(Vector3(at.x, 0, at.y), forward)
+	shift.update_job_progress()
+	check(shift.hud.opened == 0, "An isolated cut at the back of the loading bay is incomplete")
+	for i in range(34):
+		var at := path[0] + heading * i * .125
+		bay.cut(Vector3(at.x, 0, at.y), forward)
+	shift.update_job_progress()
+	check(shift.hud.opened == shift.hud.target_length and shift.hud.opened == 8, "A continuous blade width satisfies the bay")
 	shift.check_job()
-	check(shift.stage==2 and shift.hud.speaker.begins_with("MRS. BECK"),"Delivery leads to the right conversation")
+	check(shift.dispatch.completed == 1 and shift.dispatch.job.site != order.site, "The outdoor sign-off gives the driver a new destination")
 	shift.check_job()
-	check(shift.stage==2,"Repeating a knock doesn't duplicate the job")
-	driver._walker.global_position = Vector3(Route.HOME_PORCH.x, 0, Route.HOME_PORCH.y)
-	shift.check_job()
-	check(shift.stage==3,"Only a visit home completes the return")
+	check(shift.dispatch.completed == 1, "A second tap at the previous stop cannot turn in the next job")
+	shift.snow.cut(Vector3(truck_at.x, 0, truck_at.y), forward)
+	var trail: float = shift.snow.clearance(truck_at)
+	bay.deposit(14)
+	check(bay.open_metres() == 0 and trail > .9 and shift.snow.clearance(truck_at) == trail, "Fresh loader snow preserves the existing cut beneath it")
 	driver.cold=.99999
 	await physics_frame
 	await physics_frame
@@ -42,18 +59,16 @@ func _run() -> void:
 	for i in 12:
 		await physics_frame
 	check(driver.cold<before_warmup,"The heater steadily restores warmth")
-	shift.stage = 0
-	for example: Array in [[Vector3(0,0,36),"co-op"],[Vector3(0, 0, Route.BECK_Z - 40),"south"],[Vector3(18, 0, Route.BECK_Z),"Lower the blade"],[Vector3(-23,0,-25),"telephone poles"],[Vector3(0,0,Route.COOP_Z),"half a mile"]]:
-		driver._truck.global_position=example[0]
-		shift.directions()
-		check(shift.hud.subtitle.contains(example[1]),"Dispatch follows the truck's location at %s" % example[0])
-	shift.stage=2
-	driver._truck.global_position=Vector3(18, 0, Route.BECK_Z)
+	var next_site: Dictionary = Route.SITES[shift.dispatch.job.site]
+	driver._truck.global_position = Vector3(truck_at.x, 0, truck_at.y)
 	shift.directions()
-	check(shift.hud.subtitle.contains("left"),"Return dispatch changes with job stage")
+	check(shift.hud.subtitle.contains(next_site.name), "CB directs the driver from the old job to the next property")
+	driver._truck.global_position = Vector3(next_site.yard.x, 0, next_site.yard.y)
+	shift.directions()
+	check(shift.hud.subtitle == shift._onsite_instruction(), "Deb switches to field instructions on arrival")
 	await _test_shoulder_crossing()
 	await _test_fast_runoff()
-	print("Shift rules: porch gates, cold, warmth, radio directions, ditch crossing and shovel recovery; failures: ",failures)
+	print("Shift rules: outdoor handoffs, loading bay, cold, radio directions, ditch crossing and shovel recovery; failures: ",failures)
 	await _finish()
 
 

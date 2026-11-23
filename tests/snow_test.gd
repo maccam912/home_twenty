@@ -56,6 +56,23 @@ func _run() -> void:
 	for i in range(-6, 7):
 		expect(snow.clearance(Vector2(0, -960 + i * .25)) > .99, "County tracks continue across tile edges")
 	expect(snow.open_length() == Route.FULL_LANE, "Working a distant field preserves the Beck lane")
+	var region := Vector2(5800, 800)
+	snow.stream_to(region)
+	var original: Vector2i = snow._tile_key(Vector2(8, Route.BECK_Z))
+	expect(not snow.visible_tiles.has(original), "A distant farm releases its road mesh and texture")
+	expect(snow.visible_tiles.size() < snow.tiles.size() / 8, "Only the driver's part of the county allocates road geometry")
+	snow.cut(Vector3(region.x, 0, region.y), Vector3.RIGHT)
+	snow._process(0)
+	snow.stream_to(Route.BECK_PARK)
+	expect(snow.clearance(Vector2(8, Route.BECK_Z)) > .99 and snow.open_length() == Route.FULL_LANE, "Revisiting the farm restores the cut and the completed lane")
+	var far_tile := snow.tiles[snow._tile_key(region)]
+	expect(far_tile.texture == null and far_tile.field == null and not far_tile.packed.is_empty(), "A worked road is archived when the truck travels to another district")
+	snow.stream_to(region)
+	expect(snow.clearance(region) > .99 and far_tile.texture.get_image().get_pixelv(far_tile.pixel(region)).r > .99, "A streamed road restores the same cut to physics and the visible snow texture")
+	for indexed_tile in snow.tiles.values():
+		if indexed_tile.footprints.size() > 16:
+			expect(false, "The shader must have room for every road strip on a tile")
+			break
 	print("Snow tests: ",checks," checks, ",failures," failures")
 	quit(int(failures>0))
 

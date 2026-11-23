@@ -8,82 +8,198 @@ const TILE_PIXELS := int(TILE_METRES / CELL)
 const GRID_ORIGIN := Vector2(-16.0, 0.0)
 const SNOW_SHADER = preload("res://world/plowed_snow.gdshader")
 
-class Tile:
-	var field := Image.create_empty(TILE_PIXELS, TILE_PIXELS, false, Image.FORMAT_RG8)
-	var texture := ImageTexture.create_from_image(field)
-	var material := ShaderMaterial.new()
-	var origin: Vector2
+# Beyond this radius the road disappears into even the lightest storm fog.
+const DRAW_RADIUS := 18
+const RECENTER_TILES := 2
 
-	func _init(at: Vector2, footprints: PackedVector4Array) -> void:
+class Tile:
+	var field: Image
+	var packed := PackedByteArray()
+	var texture: ImageTexture
+	var material: ShaderMaterial
+	var geometry: Node3D
+	var origin: Vector2
+	var bounds: Array[Rect2] = []
+	var footprints := PackedVector4Array()
+
+	func _init(at: Vector2) -> void:
 		origin = at
-		material.shader = SNOW_SHADER
-		material.set_shader_parameter("snow_map", texture)
-		material.set_shader_parameter("origin", at)
-		material.set_shader_parameter("extent", Vector2.ONE * TILE_METRES)
-		material.set_shader_parameter("footprints", footprints)
-		material.set_shader_parameter("ground_contacts", Route.SNOW_CONTACTS)
+
+	func writable_field() -> Image:
+		if field == null:
+			if packed.is_empty():
+				field = Image.create_empty(TILE_PIXELS, TILE_PIXELS, false, Image.FORMAT_RG8)
+			else:
+				var bytes := packed.decompress(TILE_PIXELS * TILE_PIXELS * 2, FileAccess.COMPRESSION_FASTLZ)
+				field = Image.create_from_data(TILE_PIXELS, TILE_PIXELS, false, Image.FORMAT_RG8, bytes)
+				packed.clear()
+		return field
+
+	func archive() -> void:
+		if field != null:
+			packed = field.get_data().compress(FileAccess.COMPRESSION_FASTLZ)
+			field = null
+
+	func upload() -> void:
+		if texture == null:
+			texture = ImageTexture.create_from_image(field)
+			material.set_shader_parameter("snow_map", texture)
+		else:
+			texture.update(field)
 
 	func pixel(point: Vector2) -> Vector2i:
 		return Vector2i(((point - origin) / CELL).floor())
 
 var tiles: Dictionary[Vector2i, Tile] = {}
+var visible_tiles: Dictionary[Vector2i, Tile] = {}
 var dirty_tiles: Dictionary[Vector2i, Tile] = {}
+var strip_meshes: Dictionary[Vector2, PlaneMesh] = {}
+var fresh_snow: ImageTexture
+var view_center := Vector2i(1000000, 1000000)
 var last_stamp := Vector2(INF, INF)
 var last_heading := Vector2.ZERO
 var revision := 0
 var previous_axle := Vector2(INF, INF)
-# Reachable lateral offsets at each consecutive cleared metre of the Beck lane.
-var connected_slices: Array[Array] = []
+# A lane caches reachable lateral offsets at each consecutive cleared metre.
+# The same measurements apply to east/west and north/south approaches.
+class Lane:
+	var entrance: Vector2
+	var direction: Vector2
+	var length: int
+	var checked: Array[Array] = []
+
+	func _init(start: Vector2, heading: Vector2, metres: int) -> void:
+		entrance = start
+		direction = heading
+		length = metres
+
+	func invalidate(from: Vector2, to: Vector2) -> void:
+		if checked.is_empty():
+			return
+		var across := direction.orthogonal()
+		var low := from - entrance
+		var high := to - entrance
+		if minf(low.dot(across), high.dot(across)) > 4 or maxf(low.dot(across), high.dot(across)) < -4:
+			return
+		if maxf(low.dot(direction), high.dot(direction)) < -2:
+			return
+		var first_changed := floori(minf(low.dot(direction), high.dot(direction)) - 2)
+		if first_changed < checked.size():
+			checked.resize(maxi(0, first_changed))
+
+var lanes: Dictionary[String, Lane] = {}
 
 func _ready() -> void:
-	var footprints := PackedVector4Array()
-	for bounds: Array in Route.SURFACES:
-		footprints.append(Vector4(bounds[0].x,bounds[0].y,bounds[1].x,bounds[1].y))
-	# Each texture covers a small piece of the route. Only driven tiles upload.
-	for bounds: Array in Route.SURFACES:
-		var low: Vector2 = bounds[0]
-		var high: Vector2 = bounds[1]
-		var first := _tile_key(low)
-		var last := _tile_key(high)
+	lanes["beck"] = Lane.new(Vector2(Route.FIRST_SLICE, Route.BECK_Z), Vector2.RIGHT, Route.FULL_LANE)
+	for id: String in Route.SITES:
+		if id == "beck":
+			continue
+		var site: Dictionary = Route.SITES[id]
+		var heading: Vector2 = site.mouth.direction_to(site.yard)
+		lanes[id] = Lane.new(site.mouth + heading * Route.LANE_START, heading, Route.lane_length(id))
+	# Index lightweight rectangles for the whole survey. Pixel fields exist only
+	# where somebody has driven. Meshes and textures follow the truck.
+	var surfaces := Route.surfaces()
+	for bounds: Array in surfaces:
+		var rect := Rect2(bounds[0], bounds[1] - bounds[0])
+		var first := _tile_key(rect.position)
+		var last := _tile_key(rect.end)
 		for z in range(first.y, last.y + 1):
 			for x in range(first.x, last.x + 1):
 				var key := Vector2i(x, z)
-				var origin := GRID_ORIGIN + Vector2(key) * TILE_METRES
 				if not tiles.has(key):
-					tiles[key] = Tile.new(origin, footprints)
-				var start := low.max(origin)
-				var end := high.min(origin + Vector2.ONE * TILE_METRES)
-				if start.x < end.x and start.y < end.y:
-					_strip(start, end, tiles[key].material)
+					tiles[key] = Tile.new(GRID_ORIGIN + Vector2(key) * TILE_METRES)
+				tiles[key].bounds.append(rect)
+	# Adjacent strips contribute to the feathered shoulder at tile seams.
+	for bounds: Array in surfaces:
+		var first := _tile_key(bounds[0] - Vector2.ONE * 1.5)
+		var last := _tile_key(bounds[1] + Vector2.ONE * 1.5)
+		var footprint := Vector4(bounds[0].x, bounds[0].y, bounds[1].x, bounds[1].y)
+		for z in range(first.y, last.y + 1):
+			for x in range(first.x, last.x + 1):
+				var tile: Tile = tiles.get(Vector2i(x,z))
+				if tile:
+					tile.footprints.append(footprint)
+	var blank := Image.create_empty(1, 1, false, Image.FORMAT_RG8)
+	fresh_snow = ImageTexture.create_from_image(blank)
+	stream_to(Route.HOME_PARK)
+
+func stream_to(point: Vector2) -> void:
+	var center := _tile_key(point)
+	var movement := (center - view_center).abs()
+	if maxi(movement.x, movement.y) <= RECENTER_TILES:
+		return
+	view_center = center
+	for key: Vector2i in visible_tiles.keys():
+		var offset := (center - key).abs()
+		if maxi(offset.x, offset.y) > DRAW_RADIUS:
+			var tile := visible_tiles[key]
+			tile.geometry.queue_free()
+			tile.geometry = null
+			tile.material = null
+			tile.texture = null
+			tile.archive()
+			visible_tiles.erase(key)
+	for z in range(center.y - DRAW_RADIUS, center.y + DRAW_RADIUS + 1):
+		for x in range(center.x - DRAW_RADIUS, center.x + DRAW_RADIUS + 1):
+			var key := Vector2i(x,z)
+			if tiles.has(key) and not visible_tiles.has(key):
+				var tile := tiles[key]
+				_mount(tile)
+				visible_tiles[key] = tile
+
+func _mount(tile: Tile) -> void:
+	tile.geometry = Node3D.new()
+	add_child(tile.geometry)
+	tile.material = ShaderMaterial.new()
+	tile.material.shader = SNOW_SHADER
+	tile.material.set_shader_parameter("origin", tile.origin)
+	tile.material.set_shader_parameter("extent", Vector2.ONE * TILE_METRES)
+	tile.material.set_shader_parameter("ground_contacts", Route.SNOW_CONTACTS)
+	tile.material.set_shader_parameter("footprints", tile.footprints)
+	tile.material.set_shader_parameter("strip_count", tile.footprints.size())
+	tile.material.set_shader_parameter("snow_map", fresh_snow)
+	if tile.field != null or not tile.packed.is_empty():
+		tile.writable_field()
+		tile.upload()
+	var area := Rect2(tile.origin, Vector2.ONE * TILE_METRES)
+	for rect in tile.bounds:
+		var piece := area.intersection(rect)
+		if piece.has_area():
+			_strip(piece, tile)
 
 func _tile_key(point: Vector2) -> Vector2i:
 	return Vector2i(((point - GRID_ORIGIN) / TILE_METRES).floor())
 
-func _strip(low: Vector2, high: Vector2, material: ShaderMaterial) -> void:
-	var surface := PlaneMesh.new()
-	surface.size = high-low
-	surface.subdivide_width = ceili(surface.size.x / 0.45)
-	surface.subdivide_depth = ceili(surface.size.y / 0.45)
+func _strip(piece: Rect2, tile: Tile) -> void:
+	if not strip_meshes.has(piece.size):
+		var surface := PlaneMesh.new()
+		surface.size = piece.size
+		surface.subdivide_width = ceili(piece.size.x / 0.45)
+		surface.subdivide_depth = ceili(piece.size.y / 0.45)
+		strip_meshes[piece.size] = surface
 	var mesh := MeshInstance3D.new()
-	mesh.mesh = surface
-	mesh.position = Vector3((low.x+high.x)*.5,0,(low.y+high.y)*.5)
-	mesh.material_override = material
+	mesh.mesh = strip_meshes[piece.size]
+	mesh.position = Vector3(piece.get_center().x, 0, piece.get_center().y)
+	mesh.material_override = tile.material
 	mesh.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-	add_child(mesh)
+	tile.geometry.add_child(mesh)
 
 func on_surface(point: Vector2) -> bool:
-	for bounds: Array in Route.SURFACES:
-		var low: Vector2 = bounds[0]
-		var high: Vector2 = bounds[1]
-		if point.x>=low.x and point.x<=high.x and point.y>=low.y and point.y<=high.y:
-			return true
+	var tile: Tile = tiles.get(_tile_key(point))
+	if tile:
+		for rect: Rect2 in tile.bounds:
+			if point.x >= rect.position.x and point.x <= rect.end.x and point.y >= rect.position.y and point.y <= rect.end.y:
+				return true
 	return false
 
 func clearance(point: Vector2) -> float:
 	if not on_surface(point):
 		return 0.0
 	var tile := tiles[_tile_key(point)]
-	return tile.field.get_pixelv(tile.pixel(point)).r
+	if tile.field == null and tile.packed.is_empty():
+		return 0.0
+	return tile.writable_field().get_pixelv(tile.pixel(point)).r
 
 func stop_pass() -> void:
 	last_stamp = Vector2(INF,INF)
@@ -109,7 +225,7 @@ func cut(blade: Vector3, forward: Vector3) -> bool:
 			var key := _tile_key(p)
 			var tile := tiles[key]
 			var pixel := tile.pixel(p)
-			var previous := tile.field.get_pixelv(pixel)
+			var previous := tile.writable_field().get_pixelv(pixel)
 			if stripe<=12:
 				if previous.r < .99 or previous.g>.01:
 					tile.field.set_pixelv(pixel,Color(1,0,0))
@@ -121,12 +237,8 @@ func cut(blade: Vector3, forward: Vector3) -> bool:
 				touched = true
 	if touched:
 		revision += 1
-		# Include blade width, the sampled quarter-metre and the texel footprint.
-		var stamped := Rect2(last_stamp, Vector2.ZERO).expand(point).grow(2.0)
-		var lane := Rect2(Route.FIRST_SLICE, Route.BECK_Z - 2.5, Route.FULL_LANE, 5.0)
-		if stamped.intersects(lane):
-			var first_changed := floori(stamped.position.x) - Route.FIRST_SLICE
-			connected_slices.resize(clampi(first_changed, 0, connected_slices.size()))
+		for lane: Lane in lanes.values():
+			lane.invalidate(last_stamp, point)
 	last_stamp = point
 	last_heading = heading
 	return touched
@@ -135,22 +247,32 @@ func _process(_delta:float) -> void:
 	if dirty_tiles.is_empty():
 		return
 	for tile: Tile in dirty_tiles.values():
-		tile.texture.update(tile.field)
+		if tile.field != null:
+			if tile.material != null:
+				tile.upload()
+			else:
+				tile.archive()
 	dirty_tiles.clear()
 
 # Each meter needs a truck-width opening connected to the opening before it.
 func open_length() -> int:
-	var possible: Array = [] if connected_slices.is_empty() else connected_slices.back()
-	for x in range(Route.FIRST_SLICE + connected_slices.size(), Route.LAST_SLICE + 1):
+	return lane_opened("beck")
+
+func lane_opened(site_id: String) -> int:
+	var lane := lanes[site_id]
+	var across := lane.direction.orthogonal()
+	var possible: Array = [] if lane.checked.is_empty() else lane.checked.back()
+	for metre in range(lane.checked.size(), lane.length):
 		var next: Array[int] = []
-		for lateral in range(-7,8):
-			var z := Route.BECK_Z + lateral * CELL
-			if x != Route.FIRST_SLICE and not (possible.has(lateral) or possible.has(lateral-1) or possible.has(lateral+1) or possible.has(lateral-2) or possible.has(lateral+2)):
+		var center := lane.entrance + lane.direction * metre
+		for lateral in range(-7, 8):
+			if metre > 0 and not (possible.has(lateral) or possible.has(lateral-1) or possible.has(lateral+1) or possible.has(lateral-2) or possible.has(lateral+2)):
 				continue
 			var clear_section := true
-			for sample_x in [x-.25, float(x), x+.25]:
+			for along in [-.25, 0.0, .25]:
 				for offset in [-.625, -.375, -.125, .125, .375, .625]:
-					if clearance(Vector2(sample_x,z+offset))<.8:
+					var point := center + lane.direction * float(along) + across * (lateral * CELL + float(offset))
+					if clearance(point) < .8:
 						clear_section = false
 						break
 				if not clear_section:
@@ -159,9 +281,9 @@ func open_length() -> int:
 				next.append(lateral)
 		if next.is_empty():
 			break
-		connected_slices.append(next)
+		lane.checked.append(next)
 		possible = next
-	return connected_slices.size()
+	return lane.checked.size()
 
 func press_tires(axle: Vector3, forward: Vector3) -> void:
 	var center := Vector2(axle.x,axle.z)
@@ -180,7 +302,7 @@ func press_tires(axle: Vector3, forward: Vector3) -> void:
 			var key := _tile_key(point)
 			var tile := tiles[key]
 			var pixel := tile.pixel(point)
-			var packed := tile.field.get_pixelv(pixel)
+			var packed := tile.writable_field().get_pixelv(pixel)
 			if packed.r<.3:
 				tile.field.set_pixelv(pixel,Color(.3,packed.g*.72,0))
 				dirty_tiles[key] = tile

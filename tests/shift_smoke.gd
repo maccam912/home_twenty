@@ -3,6 +3,8 @@ extends SceneTree
 ## From project root: godot --headless --fixed-fps 60 --script res://tests/shift_smoke.gd
 
 const Route = preload("res://world/route.gd")
+# A reproducible draw from the same deck used by live shifts: Beck lane, then mill slips.
+const ROUTE_SEED := 221
 
 var shift
 var failures := 0
@@ -21,6 +23,7 @@ func _run() -> void:
 		quit(1)
 		return
 	shift = scene.instantiate()
+	shift.dispatch.rng.seed = ROUTE_SEED
 	root.add_child(shift)
 	current_scene = shift
 	await process_frame
@@ -30,11 +33,11 @@ func _run() -> void:
 		await _tap(KEY_ENTER)
 	else:
 		await _test_title_audio()
-	check(shift.mode == "drive" and shift.stage == 0, "Starting the shift opens the first job")
+	check(shift.mode == "drive" and shift.dispatch.job.site == "beck" and shift.dispatch.job.kind == "plow", "Starting the shift opens the first job")
 	if full_route:
 		await _drive_delivery()
 		if failures == 0:
-			print("PASS: drove Q, cleared the Beck lane with the truck, walked to both porches and finished the route")
+			print("PASS: signed two outdoor orders on one shift, plowed Beck lane and drove on to the feed mill")
 		await _finish()
 		return
 	await _test_cab()
@@ -193,25 +196,25 @@ func _cut_lane(from_x: float, to_x: float) -> void:
 func _test_lane() -> void:
 	check(shift.snow.open_length() == 0, "The contracted lane starts unplowed")
 	_cut_lane(Route.LAST_SLICE - 10, Route.LAST_SLICE + 2)
-	check(shift.snow.open_length() == 0 and shift.stage == 0, "An isolated strip at the tank is incomplete")
+	check(shift.snow.open_length() == 0 and shift.hud.opened == 0, "An isolated strip at the tank is incomplete")
 	_cut_lane(3.0, 14.0)
 	var partial: int = shift.snow.open_length()
-	check(partial > 0 and partial < Route.FULL_LANE and shift.stage == 0, "The entrance earns partial progress")
+	check(partial > 0 and partial < Route.FULL_LANE and shift.hud.opened == partial, "The entrance earns partial progress")
 	_cut_lane(3.0, 14.0)
-	check(shift.snow.open_length() == partial and shift.stage == 0, "Plowing an existing strip gives no extra length")
+	check(shift.snow.open_length() == partial and shift.hud.opened == partial, "Plowing an existing strip gives no extra length")
 	shift.check_job()
-	check(shift.stage == 0, "A partially open lane cannot be signed off")
+	check(shift.dispatch.completed == 0, "A partially open lane cannot be signed off")
 	_key(KEY_R, true)
 	await physics_frame
 	_cut_lane(13.0, Route.LAST_SLICE - 9)
-	check(shift.snow.open_length() == Route.FULL_LANE and shift.stage == 1, "Connecting both strips opens the full lane and advances to the porch")
+	check(shift.snow.open_length() == Route.FULL_LANE and shift.hud.opened == shift.hud.target_length, "Connecting both strips opens the full lane and advances to the porch")
 	check(shift.hud.mic and shift.hud.subtitle.is_empty(), "Completing a job while transmitting does not let an ordinary reply through")
 	_key(KEY_R, false)
 	await process_frame
 	check(not shift.hud.subtitle.is_empty(), "Deb gives the next instruction when the mic opens")
 	shift.update_job_progress()
 	shift.check_job()
-	check(shift.stage == 1, "A completed lane cannot overlap or bypass the on-foot check")
+	check(shift.dispatch.completed == 0 and shift.dispatch.job.site == "beck", "A completed lane cannot overlap or bypass the on-foot check")
 
 
 # Optional full-route playthrough: add `-- --route` to the invocation above.
@@ -225,32 +228,44 @@ func _drive_delivery() -> void:
 	await _travel(Route.BECK_PARK, 5.0)
 	await _tap(KEY_E)
 	check(not shift.driver.in_cab, "Can park and get out at the Becks")
-	check(shift.stage == 1, "A real blade pass completes the truck-width lane (meters open: %s)" % shift.snow.open_length())
+	check(shift.hud.opened == Route.FULL_LANE, "A real blade pass completes the truck-width lane (meters open: %s)" % shift.snow.open_length())
 	var truck_at: Vector3 = shift.driver.get_truck_position()
 	var truck_dir: Vector3 = shift.driver.get_forward()
 	var passenger_side := Vector2(-truck_dir.z, truck_dir.x)
 	await _round_hood()
 	await _travel(Route.BECK_PORCH, 2.9)
 	await _tap(KEY_X)
-	check(shift.stage == 2, "Knocking on foot at the Becks sends the driver home")
+	check(shift.dispatch.completed == 1 and shift.dispatch.job.site == "mill" and shift.dispatch.job.kind == "visit",
+			"Signing the Beck job in the field assigns the next outdoor stop")
 	await _travel(Vector2(truck_at.x, truck_at.z) + passenger_side * 2.5, 2.9)
 	await _tap(KEY_E)
 	check(shift.driver.in_cab, "Can get back into the truck from the Becks' porch")
+	for tick in 420:
+		if shift.hud.subtitle == shift.dispatch.job.brief:
+			break
+		await physics_frame
+	check(shift.hud.subtitle == shift.dispatch.job.brief, "Deb calls the mill order on the truck radio at Beck Farm")
 	await _tap(KEY_B)
 	# Turn in the unloading yard before pulling back onto the lane.
 	await _travel(Route.BECK_PARK + Vector2(8, -6), 3.5)
 	await _travel(Route.BECK_PARK + Vector2(6, 0), 3.0, true)
 	await _travel(Route.BECK_PARK + Vector2(-9, 0), 4.0)
 	await _travel(Vector2(4.5, Route.BECK_Z), 8.0)
-	await _travel(Vector2(-1.8, Route.BECK_Z + 16.0), 4.5)
-	await _travel(Vector2(-1.8, Route.HOME_Z - 6), 12.5)
-	await _travel(Vector2(-16.0, Route.HOME_Z), 4.5)
-	await _travel(Route.HOME_PORCH + Vector2(7, 0), 7.0)
+	var mill: Dictionary = Route.SITES.mill
+	await _travel(Vector2(1.6, Route.BECK_Z - 16), 4.5)
+	await _travel(Vector2(1.6, mill.mouth.y + 6), 10)
+	await _travel(Vector2(16, mill.mouth.y + 1.3), 4.5)
+	await _travel(Vector2(mill.mouth.x - 6, mill.mouth.y + 1.3), 8)
+	await _travel(mill.mouth + Vector2(0, -16), 4.5)
+	await _travel(mill.yard, 5)
 	await _tap(KEY_E)
+	check(not shift.driver.in_cab, "Can step out at Bader Feed Mill")
 	await _round_hood()
-	await _travel(Route.HOME_PORCH, 2.9)
+	await _travel(mill.yard.lerp(mill.stop, .72), 2.9)
+	check(shift.hud.prompt.contains(shift.dispatch.job.action), "The scale box offers the requested service action")
 	await _tap(KEY_X)
-	check(shift.stage == 3, "The home kitchen interaction completes the contract")
+	check(shift.dispatch.completed == 2 and shift.hud.completed_jobs == 2, "Both outdoor orders counted on the same shift")
+	check(shift.hud.work_order.site != "mill" and shift.hud.work_order == shift.dispatch.job, "A third order is waiting in the plat book")
 
 
 func _position() -> Vector2:

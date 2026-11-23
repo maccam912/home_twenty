@@ -97,6 +97,10 @@ func get_blade_position() -> Vector3:
 	return _model.blade_position()
 
 
+func set_cargo(item: String) -> void:
+	_model.set_cargo(item)
+
+
 func set_storm_strength(strength: float) -> void:
 	_model.set_storm_strength(strength)
 

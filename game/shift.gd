@@ -5,8 +5,10 @@ const Township = preload("res://world/township.gd")
 const PlowedSnow = preload("res://world/plowed_snow.gd")
 const Soundscape = preload("res://audio/soundscape.gd")
 const ShiftHUD = preload("res://ui/shift_hud.gd")
+const LoadingBay = preload("res://world/loading_bay.gd")
+const Dispatch = preload("res://game/dispatch.gd")
 const Route = preload("res://world/route.gd")
-const PORCH_REACH := 3.7
+const STOP_REACH := 3.7
 const PICTURE_LINES := 320.0
 const SHOVEL_STROKES := 3
 const STROKE_SECONDS := 0.95
@@ -17,9 +19,13 @@ var spray: CPUParticles3D
 var hud
 var soundscape
 var mode := "title"
-var stage := 0
 var shift_started := false
 var closing := false
+var dispatch := Dispatch.new()
+var pending_order_call := false
+var pending_route_call := false
+var loading_bays: Dictionary[String, LoadingBay] = {}
+var last_bay_revision := -1
 var touch_enabled := OS.has_feature("mobile") or "--touch-ui" in OS.get_cmdline_user_args()
 var title_camera := Camera3D.new()
 var drive_camera: Camera3D
@@ -45,6 +51,8 @@ func _ready() -> void:
 	snow.name = "Snow"
 	add_child(snow)
 	spray = snow.create_spray()
+	dispatch.lane_is_open = func(site: String) -> bool:
+		return snow.lane_opened(site) >= Route.lane_length(site)
 	driver = Driver.new()
 	driver.name = "Driver"
 	driver.process_mode = Node.PROCESS_MODE_PAUSABLE
@@ -107,7 +115,9 @@ func begin_shift() -> void:
 		soundscape.start_truck()
 		if is_instance_valid(drive_camera):
 			drive_camera.make_current()
-		say("DEB   /   CB 19","There you are, hon. The Becks need their propane. Left at the end of our drive, then a mile north on Q. Turn right at their box and plow through to the tank.",10.5)
+		dispatch.start_shift()
+		_dispatch_changed()
+		_call_order()
 
 func _act_menu(action: String) -> void:
 	match action:
@@ -197,83 +207,106 @@ func say(who: String, what: String, seconds: float) -> void:
 	message_left = seconds
 	hud.queue_redraw()
 
-func _area(p: Vector2) -> String:
-	if absf(p.y - Route.BECK_Z) < 14 and p.x > 4.3 and p.x < Route.TANK.x + 15:
-		return "BECK LANE"
-	if absf(p.y - Route.HOME_Z) < 14 and p.x < -4.3 and p.x > Route.HOME_HOUSE.x - 10:
-		return "HOME PLACE"
-	if absf(p.x) < 9 and p.y >= Route.ROAD_NORTH_Z and p.y <= Route.ROAD_SOUTH_Z:
-		return "COUNTY Q"
-	return "OPEN COUNTRY"
-
 func directions() -> void:
+	pending_route_call = false
 	var v: Vector3 = driver.get_truck_position()
-	var p := Vector2(v.x,v.z)
-	var area := _area(p)
-	var words: String
+	var p := Vector2(v.x, v.z)
+	var order := dispatch.job
 	if driver.stuck:
-		words = "You buried her, hon? Grab the shovel and clear the packed snow by the tires. Take it easy coming back up."
-	elif stage >= 2:
-		if area == "HOME PLACE":
-			words = "Come up to the house, hon. I left the kitchen light on for you."
-		elif area == "BECK LANE":
-			words = "Back out to Q and take a left. It’s a mile south to our drive. Look for our box on the right."
-		elif absf(p.y - Route.HOME_Z) < 12 and area == "COUNTY Q":
-			words = "That’s our turn. Take the west drive all the way up to the kitchen porch."
-		elif p.y > Route.HOME_Z:
-			words = "Come north on Q. Turn left at our box. The kitchen light’s on up the drive."
-		else:
-			words = "Follow Q south. Our mailbox is on the west side. Take the drive up to the house."
-	elif stage == 1:
-		words = "The Becks’ porch is on the south side of the lane, across from their tank. Park up and give them a knock."
-	elif area == "HOME PLACE":
-		words = "Come down our drive and turn left on Q. Go a mile north, past the co-op sign, to the Becks’ mailbox."
-	elif area == "BECK LANE":
-		words = "That’s their lane. Lower the blade and open one truck-width all the way from the mailbox to the tank."
-	elif area == "OPEN COUNTRY":
-		words = "Look for the telephone poles on Q. The Becks’ turn is on the east side, by their mailbox."
-	elif absf(p.y - Route.BECK_Z) < 12:
-		words = "You’re at their turn. The lane runs east here. Put the blade down and take it all the way to the tank."
-	elif p.y < Route.BECK_Z:
-		words = "You’re past them. Come south on Q, then go left at the Beck mailbox."
-	elif absf(p.y - Route.COOP_Z) < 40:
-		words = "You’re by the co-op sign. Keep north. It’s a little under half a mile to their turn."
-	elif p.y < Route.COOP_Z:
-		words = "Keep north on Q. The next drive on the right is the Becks’. Look for the red flag on their box."
-	else:
-		words = "Head north on Q past the co-op sign. Take the east drive at the Beck mailbox."
-	say("DEB   /   CB 19",words,8)
+		say("DEB   /   CB 19", "You buried her, hon? Grab the shovel and clear the packed snow by the tires. Take it easy coming back up.", 8)
+		return
+	var site: Dictionary = Route.SITES[order.site]
+	var words := Route.directions(p, order.site)
+	if p.distance_to(site.yard) < 22:
+		words = _onsite_instruction()
+	elif order.kind == "plow" and p.distance_to(site.mouth) < 16:
+		words = "That's the turn for %s. Lower the blade and open a truck-width from the road to the yard." % site.name
+	say("DEB   /   CB 19", words, maxf(7.0, words.length() / 17.0))
+
+func _onsite_instruction() -> String:
+	if hud.opened < hud.target_length:
+		if dispatch.job.kind == "windrow":
+			return "There's a pile in the yard. Drop the blade and run the length of the bay between the orange stakes."
+		return "There's still a ridge across the run. Open a truck-width all the way from the road to the yard."
+	if hud.target_length > 0:
+		return "That's open, hon. Park and sign the slip at %s." % Dispatch.fixture_for(dispatch.job.site)
+	return dispatch.job.instruction
+
+func _at_stop(p: Vector2) -> bool:
+	if dispatch.job.is_empty():
+		return false
+	var stop: Vector2 = Route.SITES[dispatch.job.site].stop
+	return p.distance_squared_to(stop) <= STOP_REACH * STOP_REACH
+
+func field_action_label() -> String:
+	if driver.in_cab:
+		return ""
+	var v: Vector3 = driver.get_driver_position()
+	if _at_stop(Vector2(v.x, v.z)):
+		return dispatch.job.action
+	return ""
 
 func check_job() -> void:
-	var v: Vector3 = driver.get_driver_position()
-	var p := Vector2(v.x,v.z)
 	if driver.in_cab:
-		say("IN THE CAB","Park and get out to knock at the porch.",3)
-	elif stage==1 and p.distance_to(Route.BECK_PORCH)<=PORCH_REACH:
-		stage = 2
-		say("MRS. BECK   /   AT THE DOOR","Oh, thank goodness. We were down to a quarter tank. Tell Deb I still have her pie plate.",8)
-	elif stage==2 and p.distance_to(Route.HOME_PORCH)<=PORCH_REACH:
-		stage = 3
-		say("DEB   /   AT HOME","There you are. Leave your boots by the stove, hon. I kept the coffee hot.",10)
-	elif p.distance_to(Route.BECK_PORCH)<=PORCH_REACH:
-		say("AT THE BECKS’ DOOR","You can still see the ridge from the door. The propane truck needs a clear run." if stage==0 else "Through the window, Mrs. Beck waves you on home.",5)
-	elif p.distance_to(Route.HOME_PORCH)<=PORCH_REACH:
-		say("DEB   /   AT HOME","Coffee’s hot whenever you want it. The Becks are counting on you." if stage<3 else "Sit a little. It can snow without us for a minute.",6)
-	else:
-		say("OUTSIDE","Get close enough to reach the porch door.",2.5)
-	hud.stage = stage
+		say("IN THE CAB", "Park and step outside to lend a hand.", 3)
+		return
+	var v: Vector3 = driver.get_driver_position()
+	if not _at_stop(Vector2(v.x, v.z)):
+		say("OUTSIDE", "Your stop is marked on Deb's slip in the plat book.", 3)
+		return
+	update_job_progress()
+	if hud.opened < hud.target_length:
+		say("AT THE TURNOUT", _onsite_instruction(), 6)
+		return
+	var response := dispatch.finish_stop()
+	say(response.speaker, response.text, 6.0)
+	_dispatch_changed()
+
+func _dispatch_changed() -> void:
+	var order := dispatch.job
+	driver.set_cargo(order.get("cargo", ""))
+	hud.completed_jobs = dispatch.completed
+	hud.work_order = order
+	hud.opened = 0
+	hud.target_length = 0
+	if order.kind == "plow":
+		hud.target_length = Route.lane_length(order.site)
+		hud.opened = snow.lane_opened(order.site)
+	elif order.kind == "windrow":
+		if not loading_bays.has(order.site):
+			var bay := LoadingBay.new()
+			add_child(bay)
+			bay.setup(Route.pile_path(order.site))
+			loading_bays[order.site] = bay
+		var bay := loading_bays[order.site]
+		bay.deposit(dispatch.completed)
+		hud.target_length = bay.length_metres
+		last_bay_revision = bay.revision
+	last_revision = snow.revision
+	pending_order_call = true
+	pending_route_call = false
 
 func update_job_progress() -> void:
-	if stage!=0 or last_revision==snow.revision:
-		return
-	last_revision = snow.revision
-	hud.opened = snow.open_length()
-	if hud.opened>=Route.FULL_LANE:
-		stage = 1
-		hud.stage = 1
-		if not mic_down:
-			say("DEB   /   CB 19","They can get a truck in there now. Would you knock at the porch across from the tank? I’d sleep better.",9)
-			soundscape.play_cue("radio_squelch")
+	var order := dispatch.job
+	var previous: int = hud.opened
+	if order.kind == "plow" and last_revision != snow.revision:
+		last_revision = snow.revision
+		hud.opened = snow.lane_opened(order.site)
+	elif order.kind == "windrow":
+		var bay := loading_bays[order.site]
+		if bay.revision != last_bay_revision:
+			last_bay_revision = bay.revision
+			hud.opened = bay.open_metres()
+	if previous < hud.target_length and hud.opened == hud.target_length and driver.in_cab and not mic_down:
+		say("DEB   /   CB 19", _onsite_instruction(), 7)
+		soundscape.play_cue("radio_squelch")
+
+func _call_order() -> void:
+	pending_order_call = false
+	pending_route_call = true
+	soundscape.play_cue("radio_squelch")
+	var words: String = dispatch.job.brief
+	say("DEB   /   CB 19", words, maxf(8.0, words.length() / 17.0))
 
 func _physics_process(delta: float) -> void:
 	town.set_truck_pose(driver.get_truck_position(), driver.get_forward(), driver.get_truck_up())
@@ -282,6 +315,7 @@ func _physics_process(delta: float) -> void:
 	if mode!="drive":
 		return
 	var truck_at: Vector3 = driver.get_truck_position()
+	snow.stream_to(Vector2(truck_at.x, truck_at.z))
 	driver.set_snowbank_contact(not snow.on_surface(Vector2(truck_at.x, truck_at.z)))
 	_shovel_wheels(delta)
 	var blade_tip: Vector3 = driver.get_blade_position()
@@ -293,7 +327,12 @@ func _physics_process(delta: float) -> void:
 	driver.snow_load = (.28 if on_road else .9)*uncut
 	if driver.in_cab and driver.blade_down and driver.speed_mps>.15:
 		driver.snow_load = (.62 if on_road else 1.0)*uncut
-		if snow.cut(blade_tip,forward):
+		var cut: bool = snow.cut(blade_tip, forward)
+		for bay: LoadingBay in loading_bays.values():
+			if bay.cut(blade_tip, forward):
+				cut = true
+				driver.snow_load = 1.0
+		if cut:
 			last_cut = .16
 			var side := forward.cross(Vector3.UP)
 			spray.global_position = blade_tip + side*1.16 + Vector3.UP*.14
@@ -311,13 +350,13 @@ func _physics_process(delta: float) -> void:
 		update_job_progress()
 	var player: Vector3 = driver.get_driver_position()
 	var pos := Vector2(player.x,player.z)
-	hud.area = _area(pos)
-	hud.stage = stage
+	hud.area = Route.area_at(pos)
 	hud.mph = roundi(absf(driver.speed_mps)*2.237)
 	hud.low_grip = driver.speed_mps > Driver.GRIP_LIMIT
 	hud.cab = driver.in_cab
 	hud.blade = driver.blade_down
 	hud.prompt = ""
+	var field_action := field_action_label()
 	if driver.stuck and driver.in_cab:
 		hud.prompt = "Wheels buried · Exit cab to shovel" if touch_enabled else "Wheels buried · [E] Get out to shovel"
 	elif driver.can_dig_out():
@@ -326,14 +365,17 @@ func _physics_process(delta: float) -> void:
 			hud.prompt += "  ·  %d/%d" % [cleared_scoops, SHOVEL_STROKES]
 	elif driver.stuck:
 		hud.prompt = "Walk up beside a buried wheel"
-	elif not driver.in_cab and (pos.distance_to(Route.BECK_PORCH)<=PORCH_REACH or pos.distance_to(Route.HOME_PORCH)<=PORCH_REACH):
-		hud.prompt = "[X]  Knock at the porch" if stage!=2 or pos.distance_to(Route.HOME_PORCH)>PORCH_REACH else "[X]  Join Deb for coffee"
+	elif not field_action.is_empty():
+		hud.prompt = "[X]  " + field_action
 	elif not driver.in_cab and player.distance_to(driver.get_truck_position())<4:
 		hud.prompt = "[E]  Climb into the cab"
-	elif stage==0 and driver.in_cab and not driver.blade_down and hud.area=="BECK LANE":
-		hud.prompt = "[B]  Lower the blade"
 	elif mic_down:
 		hud.prompt = "Transmitting  ·  release R to listen"
+	elif driver.in_cab and not driver.blade_down and hud.opened < hud.target_length:
+		var site: Dictionary = Route.SITES[dispatch.job.site]
+		var blade_start: Vector2 = site.mouth if dispatch.job.kind == "plow" else site.yard
+		if pos.distance_squared_to(blade_start) < 18.0 * 18.0:
+			hud.prompt = "[B]  Lower the blade"
 	if touch_enabled and hud.prompt!="":
 		hud.prompt = hud.prompt.replace("[X]  ","").replace("[E]  ","").replace("[B]  ","").replace("release R to listen","release the mic to listen")
 	hud.set_cold(driver.cold)
@@ -341,6 +383,12 @@ func _physics_process(delta: float) -> void:
 		message_left -= delta
 		if message_left<=0:
 			hud.subtitle = ""
+	if driver.in_cab and not mic_down and message_left <= 0:
+		if pending_order_call:
+			_call_order()
+		elif pending_route_call:
+			soundscape.play_cue("radio_squelch")
+			directions()
 	hud.queue_redraw()
 
 func _notification(what:int) -> void:

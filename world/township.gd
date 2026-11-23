@@ -2,6 +2,7 @@ extends Node3D
 
 const Route = preload("res://world/route.gd")
 const Roadside = preload("res://world/roadside.gd")
+const Backroads = preload("res://world/backroads.gd")
 const TruckMesh = preload("res://vehicle/truck_mesh.gd")
 const BECK_TANK = preload("res://world/props/beck_tank.tscn")
 const BECK_MAILBOX = preload("res://world/props/beck_mailbox.tscn")
@@ -32,6 +33,9 @@ var drift_material := ShaderMaterial.new()
 var lamp_centers := PackedVector3Array()
 var truck_position := Vector3(Route.HOME_PARK.x,0,Route.HOME_PARK.y)
 var truck_forward := Vector3.RIGHT
+var road_bounds: Array[Rect2] = []
+var surface_cells: Dictionary = {}
+const SCENERY_CELL := 384.0
 
 func _ready() -> void:
 	rng.seed = 7581958
@@ -50,10 +54,24 @@ func _ready() -> void:
 		drift_forms.append(_drift_mesh(variant))
 	_load_woodlot()
 	_light_and_weather()
+	for surface: Array in Route.surfaces():
+		var rect := Rect2(surface[0], surface[1] - surface[0])
+		road_bounds.append(rect)
+		var start := Vector2i((rect.position / SCENERY_CELL).floor())
+		var end := Vector2i((rect.end / SCENERY_CELL).floor())
+		for z in range(start.y, end.y + 1):
+			for x in range(start.x, end.x + 1):
+				var cell := Vector2i(x, z)
+				if not surface_cells.has(cell):
+					surface_cells[cell] = []
+				surface_cells[cell].append(rect)
 	_snowfield()
 	_buildings()
 	_road_furniture()
 	_feed_sign()
+	_outer_roads()
+	_contract_yards()
+	Backroads.new(self).build()
 	for medium: ShaderMaterial in [flake_material, drift_material]:
 		medium.set_shader_parameter("yard_lamps", lamp_centers)
 	_tree_lines()
@@ -67,7 +85,7 @@ func _materials() -> void:
 		"trim": "#c3beb0", "frame": "#494847", "glass": "#586970", "green": "#45635a",
 		"red": "#964835", "dark_red": "#652e2b", "stone": "#858783", "brick": "#896451",
 		"tank": "#d0cbc1", "grass": "#8d7863", "ice": "#b9c9c9", "roadside": "#778992",
-		"orange": "#d18b4a", "black": "#383b3a", "silo": "#999b94", "gutter": "#939894"
+		"school_bus": "#c0a047", "gravel": "#756d62", "orange": "#d18b4a", "black": "#383b3a", "silo": "#999b94", "gutter": "#939894"
 	}
 	for key in shades:
 		var mat := StandardMaterial3D.new()
@@ -222,26 +240,32 @@ func _process(delta: float) -> void:
 			weather_camera = camera
 
 func _snowfield() -> void:
-	var middle_z := (Route.ROAD_NORTH_Z + Route.ROAD_SOUTH_Z) * .5
-	var length := Route.ROAD_SOUTH_Z - Route.ROAD_NORTH_Z
 	var ground := Roadside.new()
 	ground.build(mats.snow)
 	add_child(ground)
-	for x in [-695.0,695.0]:
-		_block("Field edge", Vector3(x,1.6,middle_z), Vector3(2,5,length+170))
-	for z in [Route.ROAD_NORTH_Z-80.0, Route.ROAD_SOUTH_Z+80.0]:
-		_block("Far field edge", Vector3(0,1.6,z), Vector3(1400,5,2))
+	var fence := Route.COUNTY_BOUNDS.grow(70.0)
+	for x: float in [fence.position.x, fence.end.x]:
+		_block("Township edge", Vector3(x, 2, fence.get_center().y), Vector3(2, 6, fence.size.y + 2))
+	for z: float in [fence.position.y, fence.end.y]:
+		_block("Township edge", Vector3(fence.get_center().x, 2, z), Vector3(fence.size.x + 2, 6, 2))
 
 	# Shallow sheets across the flats catch the ambient light. The horizon stays level.
 	for i in range(175):
 		var x := rng.randf_range(42,590) * (-1 if i%2 else 1)
-		var z := rng.randf_range(Route.ROAD_NORTH_Z-100,Route.ROAD_SOUTH_Z+100)
-		if (x > 0 and absf(z-Route.BECK_Z)<34) or (x < 0 and absf(z-Route.HOME_Z)<32):
+		var z := rng.randf_range(Roadside.DITCH_NORTH-100,Roadside.DITCH_SOUTH+100)
+		if _near_surface(Vector2(x, z), 32):
 			continue
 		_drift(Vector3(x,-.07,z),Vector3(rng.randf_range(8,23),rng.randf_range(.18,.65),rng.randf_range(22,60)),rng.randf_range(1.06,1.39))
-	# The cleared county route runs out in old plow banks at the playable limits.
-	for z in [Route.ROAD_NORTH_Z-3.0, Route.ROAD_SOUTH_Z+3.0]:
-		_drift(Vector3(0,0,z),Vector3(7.4,1.55,26),PI*.46)
+
+func _near_surface(point: Vector2, margin: float) -> bool:
+	var start := Vector2i(((point - Vector2.ONE * margin) / SCENERY_CELL).floor())
+	var end := Vector2i(((point + Vector2.ONE * margin) / SCENERY_CELL).floor())
+	for z in range(start.y, end.y + 1):
+		for x in range(start.x, end.x + 1):
+			for rect: Rect2 in surface_cells.get(Vector2i(x,z), []):
+				if rect.grow(margin).has_point(point):
+					return true
+	return false
 
 func _drift(at: Vector3, dims: Vector3, yaw: float) -> void:
 	_shape(drift_forms[rng.randi_range(0,drift_forms.size()-1)],at,dims,"snow",Vector3(0,yaw,0))
@@ -415,8 +439,8 @@ func _road_furniture() -> void:
 	# Thirty-five 46 m spans separate the two farm services along the section line.
 	var previous := Vector3.ZERO
 	var first_z := Route.HOME_Z + 13.0
-	var first_span := floori((first_z-Route.ROAD_SOUTH_Z)/46.0)
-	var last_span := ceili((first_z-Route.ROAD_NORTH_Z)/46.0)
+	var first_span := floori((first_z-Roadside.DITCH_SOUTH)/46.0)
+	var last_span := ceili((first_z-Roadside.DITCH_NORTH)/46.0)
 	for span in range(first_span,last_span+1):
 		var p := Vector3(-8.8 - sin(span*.57)*.24,0,first_z-span*46.0)
 		p.y = Roadside.height_at(p.x, p.z)
@@ -483,6 +507,335 @@ func _feed_sign() -> void:
 	face.transform = mount.translated_local(Vector3(0,2.37,.119))
 	add_child(face)
 
+
+# Sparse marker pairs and dated green blades make the new roads readable
+# from both directions, including when a squall hides the next building.
+func _outer_roads() -> void:
+	for road: Dictionary in Route.ROADS.slice(1,4):
+		var a: Vector2 = road.a
+		var b: Vector2 = road.b
+		var along := a.direction_to(b)
+		var across := along.orthogonal()
+		for distance in range(18, int(a.distance_to(b))-9, 32):
+			for side: int in [-1, 1]:
+				var at := a + along * (distance + side * 2) + across * side * 4.7
+				if not _near_surface(at, .6):
+					_snow_stake(Vector3(at.x, 0, at.y))
+	for id: String in Route.SITES:
+		if id == "beck":
+			continue # The mailbox, road blade and snow poles mark this lane already.
+		var site: Dictionary = Route.SITES[id]
+		var mouth: Vector2 = site.mouth
+		var toward: Vector2 = mouth.direction_to(site.yard)
+		var across := toward.orthogonal()
+		var pt := mouth + toward * 7.3 + across * 4.9
+		var base := Vector3(pt.x, Roadside.height_at(pt.x, pt.y), pt.y)
+		_box(base + Vector3.UP * 1.02, Vector3(.13, 2.04, .13), "creosote")
+		_name_board(base + Vector3.UP * 1.93, site.name.to_upper(), atan2(across.x, across.y), maxf(2.9, site.name.length() * .135))
+		for i in range(12, int(mouth.distance_to(site.yard)) - Route.YARD_MARGIN, 15):
+			for side: int in [-1, 1]:
+				pt = mouth + toward * i + across * 3.65 * side
+				_snow_stake(Vector3(pt.x, 0, pt.y))
+	_fence(Vector3(627,0,-1150), Vector3(627,0,-1242), 5.3)
+	_fence(Vector3(270,0,-706), Vector3(323,0,-706), 4.9)
+	for i in 18:
+		_pine(Vector3(660 + rng.randf_range(0,9), 0, -1105 + i*4.8), rng.randf_range(7,13), true)
+
+	# Bader's old two-wire feed is an unbroken sight line along the south
+	# shoulder of Mill. The poles sit beyond the plow wings at the crossings.
+	var previous := Vector3.ZERO
+	for i in range(11):
+		var pole := Vector3(24+i*59,0,-1770)
+		_beam(pole,pole+Vector3(.13,7.7,.09),.23,"pole")
+		_box(pole+Vector3(.13,7.24,.09),Vector3(.17,.18,1.85),"wood")
+		for side: float in [-.68,.68]:
+			var top := Vector3(.13,7.43,side+.09)
+			_shape(drum,pole+top,Vector3(.14,.23,.14),"glass")
+			if i:
+				_wire(previous+top,pole+top,1.07,.043)
+		_block("Mill line pole",pole+Vector3.UP*3,Vector3(.26,6,.26))
+		previous = pole
+	_water_tower(Vector3(664,0,-1798))
+	# At the two right-angle corners the paired arrows face oncoming traffic.
+	for z: float in [-1780,-720]:
+		_bend_marker(Vector3(646,0,z),-PI/2, 1 if z < -1000 else -1)
+		var north := z < -1000
+		_bend_marker(Vector3(640,0,z+(-6 if north else 6)),0 if north else PI,-1 if north else 1)
+
+	# Snow-capped banks catch the low beams on either side of the road even
+	# in a whiteout. Keep the entrances open for every county contract.
+	for road: Dictionary in Route.ROADS.slice(1,4):
+		var a: Vector2 = road.a
+		var b: Vector2 = road.b
+		var dir := a.direction_to(b)
+		for i in range(28, int(a.distance_to(b)) - 25, 23):
+			var side := 1 if i % 2 else -1
+			var at := a + dir * (i + rng.randf_range(-3,3)) + dir.orthogonal() * side * rng.randf_range(6.4,7.7)
+			var length := rng.randf_range(13,24)
+			var half_span := dir.abs() * (length*.5) + dir.orthogonal().abs()*1.15
+			var footprint := Rect2(at-half_span, half_span*2).grow(.7)
+			var blocked := false
+			for surface in road_bounds:
+				if surface.intersects(footprint):
+					blocked = true
+					break
+			if not blocked:
+				_drift(Vector3(at.x,-.035,at.y),Vector3(2.2,rng.randf_range(.34,.76),length),atan2(dir.x,dir.y))
+	# Line follows the woodlot edges. Short gaps leave the section corners and
+	# farm entrances visible from the cab.
+	for stand: Vector2 in [Vector2(625,-1760), Vector2(665,-1625), Vector2(611,-1398),
+			Vector2(664,-1294), Vector2(619,-1210), Vector2(660,-997), Vector2(622,-836)]:
+		for i in 7:
+			var at := Vector3(stand.x+rng.randf_range(-4,4),0,stand.y+i*5.5)
+			if i%3 == 0:
+				_pine(at,rng.randf_range(7.3,11.4),true)
+			else:
+				_bare_tree(at,rng.randf_range(7.8,12.5),false)
+	_fence(Vector3(650,0,-1615),Vector3(650,0,-1535),5.7)
+	_fence(Vector3(629,0,-1355),Vector3(629,0,-1290),4.9)
+	_fence(Vector3(651,0,-923),Vector3(651,0,-854),5.2)
+	_field_frames(Vector3(290,0,-692))
+	for at: Vector3 in [Vector3(63,0,-734), Vector3(130,0,-699), Vector3(374,0,-737),
+			Vector3(520,0,-696), Vector3(585,0,-734)]:
+		_bare_tree(at,rng.randf_range(8,11),true)
+
+func _bend_marker(at: Vector3, yaw: float, arrow: int) -> void:
+	var t := Transform3D(Basis(Vector3.UP,yaw),at)
+	_local(t,Vector3(0,.93,0),Vector3(.12,1.86,.14),"creosote")
+	_local(t,Vector3(0,1.75,0),Vector3(1.60,.62,.10),"school_bus")
+	for x: float in [-.38,.38]:
+		for half: float in [-1,1]:
+			_local(t,Vector3(x,1.75+half*.12,.068),Vector3(.34,.12,.025),"black",
+					Vector3(0,0,-arrow*half*.65))
+	_local(t,Vector3(0,2.09,0),Vector3(1.65,.065,.15),"snow")
+
+func _water_tower(at: Vector3) -> void:
+	for sx: float in [-1,1]:
+		for sz: float in [-1,1]:
+			var foot := at+Vector3(3.4*sx,0,3.4*sz)
+			var top := at+Vector3(2.0*sx,12,2.0*sz)
+			_beam(foot,top,.29,"galv")
+			_beam(foot.lerp(top,.19),at+Vector3(-2.15*sx,10.7,2.15*sz),.09,"metal")
+			_beam(foot.lerp(top,.28),at+Vector3(2.15*sx,10.7,-2.15*sz),.09,"metal")
+	_shape(drum,at+Vector3.UP*13.9,Vector3(7.35,4.2,7.35),"galv")
+	_shape(mound,at+Vector3.UP*11.95,Vector3(7.33,2.8,7.33),"metal")
+	_shape(mound,at+Vector3.UP*16.03,Vector3(7.58,2.3,7.58),"snow")
+	_shape(drum,at+Vector3.UP*5.7,Vector3(.72,11.4,.72),"metal")
+	_box(at+Vector3.UP*17.15,Vector3(.14,.25,.14),"red")
+	_block("Water tower",at+Vector3.UP*5.7,Vector3(.75,11.4,.75))
+
+func _field_frames(base: Vector3) -> void:
+	# Rolled-up lath on the bare ginseng shade frames, stacked downwind.
+	for row in 3:
+		var front := base + Vector3(0,0,row*8.0)
+		for i in 6:
+			var post := front + Vector3(i*7.2,0,0)
+			_box(post+Vector3(0,1.22,0),Vector3(.17,2.44,.17),"wood")
+			if i:
+				_beam(post+Vector3(-7.2,2.32,0),post+Vector3(0,2.32,0),.085,"galv")
+			if row:
+				_wire(post+Vector3.UP*2.32,post+Vector3(0,2.32,-8),.21,.04)
+		_box(front+Vector3(38,.42,-1),Vector3(1.55,.72,6.1),"wood")
+		_box(front+Vector3(38,.81,-1),Vector3(1.61,.11,6.2),"snow")
+
+func _name_board(at: Vector3, title: String, yaw: float, width := 1.65) -> void:
+	var t := Transform3D(Basis(Vector3.UP, yaw), at)
+	_local(t, Vector3.ZERO, Vector3(width,.31,.09), "green")
+	_local(t, Vector3(0,.17,0), Vector3(width+.04,.045,.12), "snow")
+	for side: int in [-1, 1]:
+		_letter(title, t * Vector3(0,0,side*.051), yaw + (PI if side < 0 else 0.0), .0048)
+
+func _contract_yards() -> void:
+	# Grain bins, elevator head, receiving scale and a row of loading doors.
+	_silo(Vector3(195,0,-1860), 3.5, 14.6)
+	_silo(Vector3(185,0,-1860), 3.5, 12.8)
+	_barn(Vector3(213,0,-1870), 0, Vector3(17,5.1,9), false)
+	_box(Vector3(203,8.3,-1866), Vector3(2.4,16.6,3.1), "shed_siding")
+	_box(Vector3(195,12.9,-1866), Vector3(17,.8,.95), "galv")
+	var sign := Vector3(213,4.22,-1865.35)
+	_box(sign, Vector3(9.3,.94,.16), "green")
+	_letter("BADER FEED & GRAIN", sign+Vector3(0,0,.09), 0, .0132)
+	_lamp(Vector3(216.7,3.56,-1864.9), 6.8)
+	_drop_box(Route.SITES.mill.stop, "SCALE TICKETS")
+	_service_station()
+	_churchyard()
+	_school_turn()
+	_barn(Vector3(182,0,-808), 0, Vector3(17,5.6,12), true)
+	_silo(Vector3(160,0,-810), 3.2, 15.2)
+	_corn_crib(Vector3(204,0,-811), -.11)
+	for i in 6:
+		_pine(Vector3(159+i*8.1,0,-824+rng.randf_range(-1,1)),rng.randf_range(6.9,11.5),true)
+	var rack := Vector3(Route.SITES.kroll.stop.x, 0, Route.SITES.kroll.stop.y)
+	_box(rack+Vector3.UP*.62,Vector3(2.4,.14,.82),"wood")
+	_block("Milk can stand",rack+Vector3.UP*.58,Vector3(2.4,1.1,.82))
+	for x: float in [-.94, .94]:
+		_box(rack+Vector3(x,.31,0),Vector3(.15,.62,.65),"creosote")
+	for x: float in [-.62,.03,.65]:
+		var can := rack + Vector3(x,1.04,0)
+		_shape(drum,can,Vector3(.45,.72,.45),"galv")
+		_shape(drum,can+Vector3.UP*.39,Vector3(.33,.13,.33),"metal")
+		_box(can+Vector3(0,.48,0),Vector3(.19,.05,.08),"black")
+	_gravel_pit()
+
+func _drop_box(point: Vector2, title: String) -> void:
+	var t := Transform3D(Basis.IDENTITY, Vector3(point.x,0,point.y))
+	_local(t, Vector3(0,.62,0),Vector3(.17,1.24,.16),"creosote")
+	_block("Yard box", t * Vector3(0,.78,0), Vector3(.65,1.5,.4))
+	_local(t, Vector3(0,1.22,0),Vector3(.79,.62,.42),"galv")
+	_local(t, Vector3(0,1.41,.22),Vector3(.52,.045,.027),"black")
+	_local(t, Vector3(0,1.56,0),Vector3(.86,.08,.51),"snow")
+	_local(t, Vector3(0,1.17,.225),Vector3(.75,.18,.028),"green")
+	_letter(title,t*Vector3(0,1.17,.245),0,.0022)
+
+func _service_station() -> void:
+	var t := Transform3D(Basis.IDENTITY, Vector3(470,0,-1714))
+	_local(t, Vector3(0,2.05,0), Vector3(12,4.1,6), "cream_board")
+	_block("Closed service station",t*Vector3(0,2.05,0),Vector3(12,4.1,6))
+	_local(t, Vector3(0,4.18,0),Vector3(12.6,.30,6.6),"snow")
+	_local(t, Vector3(-2.5,2,-3.07),Vector3(5,3.55,.13),"galv")
+	for i in 9:
+		_local(t, Vector3(-2.5,.45+i*.38,-3.16),Vector3(4.9,.04,.04),"metal")
+	_local(t, Vector3(3.0,2,-3.07),Vector3(3.3,1.38,.14),"glass")
+	_local(t, Vector3(0,3.68,-3.13),Vector3(11.5,.78,.14),"dark_red")
+	_letter("PIKE   •   SERVICE",t*Vector3(0,3.68,-3.21),PI,.016)
+	_lamp(t*Vector3(3.64,2.93,-3.18), 5.6)
+	_bare_tree(Vector3(487,0,-1707), 7.2, true)
+	var canopy := Vector3(474,3.65,-1730)
+	_box(canopy,Vector3(8,.47,5),"dark_red")
+	_box(canopy+Vector3.UP*.27,Vector3(8.15,.11,5.15),"snow")
+	_box(canopy+Vector3(0,.04,-2.51),Vector3(8,.14,.045),"trim")
+	for z: float in [-1731.5,-1728.5]:
+		_box(Vector3(477.4,1.74,z),Vector3(.16,3.48,.16),"red")
+		_box(Vector3(476.3,.76,z),Vector3(.71,1.52,.64),"trim")
+		_box(Vector3(475.93,1.14,z),Vector3(.045,.28,.49),"black")
+		_block("Pump island",Vector3(476.3,.76,z),Vector3(.75,1.52,.68))
+	_drop_box(Route.SITES.station.stop, "SERVICE BELL")
+	# The old receiver under its blue metal rain hood, outside the locked shop.
+	var phone := Vector3(Route.PHONE.x,0,Route.PHONE.y)
+	_box(phone+Vector3.UP*.81,Vector3(.14,1.62,.14),"galv")
+	_block("Telephone",phone+Vector3.UP*.87,Vector3(.64,1.74,.47))
+	_box(phone+Vector3.UP*1.47,Vector3(.65,.83,.32),"green")
+	_box(phone+Vector3(0,1.47,-.19),Vector3(.33,.44,.08),"galv")
+	_box(phone+Vector3(-.19,1.46,-.25),Vector3(.09,.33,.09),"black")
+	for y: float in [1.30,1.61]:
+		_box(phone+Vector3(-.18,y,-.25),Vector3(.16,.11,.17),"black")
+	_box(phone+Vector3(0,1.93,-.15),Vector3(.82,.16,.77),"green")
+	for side: int in [-1,1]:
+		_box(phone+Vector3(side*.36,1.70,-.13),Vector3(.08,.42,.70),"green")
+	_letter("PHONE",phone+Vector3(0,1.94,-.545),PI,.0043)
+
+func _churchyard() -> void:
+	var t := Transform3D(Basis(Vector3.UP, PI/2),Vector3(551,0,-1461))
+	_local(t,Vector3(0,2.15,0),Vector3(8.4,4.3,13),"cream_board")
+	_structure_roof(t,8.4,13,4.3,3.8,"cream_board")
+	_block("Lutheran church",t*Vector3(0,2.15,0),Vector3(8.4,4.3,13),PI/2)
+	_local(t,Vector3(0,3.15,6.95),Vector3(3,6.3,2.7),"cream_board")
+	_local(t,Vector3(0,1.22,8.33),Vector3(1.62,2.44,.11),"trim")
+	_local(t,Vector3(0,1.18,8.40),Vector3(1.38,2.32,.10),"dark_red")
+	_local(t,Vector3(0,1.19,8.46),Vector3(.035,2.32,.02),"black")
+	_window(t,Vector3(0,3.25,8.32),.74,1.19,0,true)
+	_local(t,Vector3(0,.15,8.87),Vector3(2.08,.30,1.4),"stone")
+	_bare_tree(Vector3(552,0,-1480), 8.7, true)
+	_pine(Vector3(547,0,-1448), 7.4)
+	_local(t,Vector3(0,7,6.95),Vector3(2.25,1.7,2.25),"green")
+	_local(t,Vector3(0,7.08,8.10),Vector3(1.0,.91,.07),"black")
+	# Four-sided belfry spire.
+	var spire := CylinderMesh.new()
+	spire.top_radius = 0
+	spire.bottom_radius = 1.84
+	spire.height = 4.3
+	spire.radial_segments = 4
+	spire.rings = 0
+	_shape_at(spire,t*Transform3D(Basis(Vector3.UP,PI/4),Vector3(0,9.84,6.95)),"green")
+	_local(t,Vector3(0,12.28,6.95),Vector3(.085,1.46,.085),"metal")
+	_local(t,Vector3(0,12.6,6.95),Vector3(.7,.08,.08),"metal")
+	for x: float in [-4.23,4.23]:
+		for z: float in [-3.6,0,3.6]:
+			_window(t,Vector3(x,2.53,z),.78,2.0,PI/2*signf(x),false)
+	_drop_box(Route.SITES.lutheran.stop, "ST. LUKE’S")
+	var plot := Vector3(563,0,-1476)
+	for dx: float in [-2.4, 0, 2.4]:
+		_box(plot+Vector3(dx,.11,-.38),Vector3(1.14,.22,.64),"stone")
+		_box(plot+Vector3(dx,.50,-.38),Vector3(.8,.72,.25),"stone")
+		_shape(mound,plot+Vector3(dx,.86,-.38),Vector3(.81,.17,.29),"snow")
+	_fence(plot+Vector3(-3.7,0,-2),plot+Vector3(3.7,0,-2),3.7)
+
+func _school_turn() -> void:
+	var t := Transform3D(Basis.IDENTITY,Vector3(448,0,-638))
+	_local(t,Vector3(0,1.16,0),Vector3(5.2,2.32,.20),"school_bus")
+	_local(t,Vector3(0,2.49,-1),Vector3(5.52,.26,2.54),"snow",Vector3(-.09,0,0))
+	for x: float in [-2.48,2.48]:
+		_local(t,Vector3(x,1.16,-1),Vector3(.21,2.32,2.11),"school_bus")
+	_local(t,Vector3(0,.58,-.6),Vector3(4.42,.12,.61),"wood")
+	_block("Bus shelter",t*Vector3(0,1.15,.05),Vector3(5.2,2.3,.25))
+	_letter("BELL SCHOOL",t*Vector3(0,2.4,-2.31),PI,.008)
+	# Old brick schoolhouse, with its sash windows and a bell in the roof frame.
+	var school := Transform3D(Basis(Vector3.UP,-.07),Vector3(435,0,-625))
+	_local(school,Vector3(0,2.02,0),Vector3(16,4.04,9),"brick")
+	_structure_roof(school,16,9,4.04,2.32,"cream_board")
+	_block("Schoolhouse",school*Vector3(0,2.02,0),Vector3(16,4.04,9),-.07)
+	for x: float in [-5.9,-3.85,-1.8,3.65,5.7]:
+		_window(school,Vector3(x,2.22,-4.56),1.24,1.83,PI,x == 3.65)
+	_local(school,Vector3(.72,1.26,-4.61),Vector3(1.44,2.5,.19),"green")
+	for x: float in [-.85,.85]:
+		for z: float in [-.78,.78]:
+			_local(school,Vector3(x,6.93,z),Vector3(.16,2.36,.16),"trim")
+	_shape_at(mound,school*Transform3D(Basis.from_scale(Vector3(.72,.97,.72)),Vector3(0,7.24,0)),"black")
+	_local(school,Vector3(0,8.15,0),Vector3(2.06,.22,1.95),"snow")
+	_bare_tree(Vector3(458,0,-632),8.7,true)
+	var gate := Vector3(Route.SITES.bell.stop.x,0,Route.SITES.bell.stop.y)
+	_block("Road barricade",gate+Vector3.UP*.55,Vector3(2.6,1.08,.28))
+	for x: float in [-1.12,1.12]:
+		_box(gate+Vector3(x,.49,0),Vector3(.11,1.0,.17),"wood")
+		_box(gate+Vector3(x,.08,0),Vector3(.29,.16,.68),"wood")
+	_box(gate+Vector3.UP*.89,Vector3(2.65,.31,.11),"orange")
+	for x: float in [-.88,0,.88]:
+		_box(gate+Vector3(x,.89,-.065),Vector3(.23,.31,.035),"trim",Vector3(0,0,-.30))
+	var board := Vector3(Route.NOTICE.x,0,Route.NOTICE.y)
+	_block("District noticeboard",board+Vector3.UP*1.07,Vector3(1.6,2.14,.22))
+	for x: float in [-.68,.68]:
+		_box(board+Vector3(x,.99,0),Vector3(.12,1.98,.14),"wood")
+	_box(board+Vector3.UP*1.65,Vector3(1.56,1.0,.20),"green")
+	_box(board+Vector3(0,1.65,-.116),Vector3(1.38,.81,.04),"glass")
+	for x: float in [-.37,.15,.46]:
+		_box(board+Vector3(x,1.68,-.15),Vector3(.28,.39,.025),"trim",Vector3(0,0,x*.11))
+	_box(board+Vector3.UP*2.21,Vector3(1.73,.12,.42),"snow")
+	_letter("DISTRICT 4",board+Vector3(0,2.02,-.16),PI,.0036)
+
+func _gravel_pit() -> void:
+	var hopper := Vector3(96,0,-2121)
+	for x: float in [-2.4,2.4]:
+		for z: float in [-2.1,2.1]:
+			_box(hopper+Vector3(x,2.0,z),Vector3(.24,4.0,.24),"metal")
+	var funnel := CylinderMesh.new()
+	funnel.top_radius = 3.4
+	funnel.bottom_radius = .71
+	funnel.height = 2.7
+	funnel.radial_segments = 4
+	funnel.rings = 0
+	_shape(funnel,hopper+Vector3.UP*3.28,Vector3.ONE,"galv",Vector3(0,PI/4,0))
+	_box(hopper+Vector3.UP*5.31,Vector3(4.84,1.42,4.84),"metal")
+	_box(hopper+Vector3.UP*6.08,Vector3(4.98,.14,4.98),"snow")
+	_block("Gravel hopper", hopper+Vector3.UP*2.9,Vector3(4.9,5.8,4.9))
+	var belt_start := hopper + Vector3(-.3,1.15,-.8)
+	var belt_end := hopper + Vector3(12.4,5.34,-7.8)
+	var forward := belt_start.direction_to(belt_end)
+	var belt := Transform3D(Basis.looking_at(forward),belt_start.lerp(belt_end,.5))
+	var length := belt_start.distance_to(belt_end)
+	_local(belt,Vector3.ZERO,Vector3(1.45,.20,length),"black")
+	for side: float in [-.78,.78]:
+		_local(belt,Vector3(side,0,0),Vector3(.13,.58,length),"green")
+		_local(belt,Vector3(side,.32,0),Vector3(.14,.075,length),"snow")
+		_beam(belt * Vector3(side,0,-length*.4), belt_end+Vector3(side,-5.27,-1.4), .17,"galv")
+	var bay := hopper + Vector3(10,0,-10)
+	for i in 3:
+		var center := bay + Vector3(i*6.2,0,i*.9)
+		var scale := Vector3(11+i,.9+i*.42,10+i)
+		_shape(mound,center,scale*Vector3(1,4.6,1),"gravel")
+		_shape(mound,center+Vector3(.22,.25,.04),scale*Vector3(.96,4.42,.96),"snow")
+	for i in 7:
+		_pine(hopper+Vector3(17+i*4.1,0,-27+rng.randf_range(-2,2)),rng.randf_range(6,11),true)
+	_drop_box(Route.SITES.quarry.stop,"WEIGH SLIPS")
 
 func _utility_pole(p: Vector3, transformer: bool) -> void:
 	_beam(p,p+Vector3(0.11,9.15,0),0.23,"pole")
@@ -576,8 +929,8 @@ func _tree_lines() -> void:
 	# Isolated stalks and broken fencelines surface where the fields meet the ditch.
 	for i in range(140):
 		var x := rng.randf_range(8.5,48.0) * (-1 if i%2 else 1)
-		var z := rng.randf_range(Route.ROAD_NORTH_Z,Route.ROAD_SOUTH_Z)
-		if (x < 0 and absf(z-Route.HOME_Z)<8) or (x > 0 and absf(z-Route.BECK_Z)<8):
+		var z := rng.randf_range(Roadside.DITCH_NORTH,Roadside.DITCH_SOUTH)
+		if _near_surface(Vector2(x, z), 2.5):
 			continue
 		for j in range(rng.randi_range(3,8)):
 			var base := Vector3(x+rng.randf_range(-1.2,1.2),.08,z+rng.randf_range(-.9,.9))
@@ -596,8 +949,8 @@ func _ditch_grass() -> void:
 	mats["sedge"] = straw
 	var clumps := [_sedge_clump(), _sedge_clump(), _sedge_clump()]
 	for side: int in [-1, 1]:
-		var z := Route.ROAD_NORTH_Z + rng.randf_range(4, 22)
-		while z < Route.ROAD_SOUTH_Z:
+		var z := Roadside.DITCH_NORTH + rng.randf_range(4, 22)
+		while z < Roadside.DITCH_SOUTH:
 			var patch_length := rng.randf_range(4, 19)
 			var distance := rng.randf_range(8.2, 11.8)
 			for i in range(ceili(patch_length * .93)):
@@ -711,6 +1064,7 @@ func _letter(value: String, at: Vector3, angle: float, pixel: float) -> void:
 	label.position = at
 	label.rotation.y = angle
 	label.double_sided = false
+	label.visibility_range_end = 125.0
 	add_child(label)
 
 func _lamp(at: Vector3, reach: float) -> void:
@@ -792,28 +1146,40 @@ func _shape(mesh: Mesh, at: Vector3, dims: Vector3, material: String, rot := Vec
 	_shape_at(mesh,Transform3D(Basis.from_euler(rot)*Basis.from_scale(dims),at),material)
 
 func _shape_at(mesh: Mesh, t: Transform3D, material: String) -> void:
-	if not batches.has(material):
-		batches[material] = {}
-	var group: Dictionary = batches[material]
+	# A visible roadside post should draw only its own stretch of road and fields.
+	var cell := Vector2i(floori(t.origin.x / SCENERY_CELL), floori(t.origin.z / SCENERY_CELL))
+	if not batches.has(cell):
+		batches[cell] = {}
+	var materials: Dictionary = batches[cell]
+	if not materials.has(material):
+		materials[material] = {}
+	var group: Dictionary = materials[material]
 	if not group.has(mesh):
 		group[mesh] = []
 	group[mesh].append(t)
 
 func _flush_meshes() -> void:
-	for key in batches:
-		var group: Dictionary = batches[key]
-		for mesh in group:
-			var transforms: Array = group[mesh]
-			var instances := MultiMesh.new()
-			instances.transform_format = MultiMesh.TRANSFORM_3D
-			instances.mesh = mesh
-			instances.instance_count = transforms.size()
-			for i in range(transforms.size()):
-				instances.set_instance_transform(i,transforms[i])
-			var renderer := MultiMeshInstance3D.new()
-			renderer.name = "Scenery_" + str(key)
-			renderer.multimesh = instances
-			renderer.material_override = mats[key]
-			renderer.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-			add_child(renderer)
+	for cell: Vector2i in batches:
+		var materials: Dictionary = batches[cell]
+		for key: String in materials:
+			var group: Dictionary = materials[key]
+			for mesh: Mesh in group:
+				var transforms: Array = group[mesh]
+				var instances := MultiMesh.new()
+				instances.transform_format = MultiMesh.TRANSFORM_3D
+				instances.mesh = mesh
+				instances.instance_count = transforms.size()
+				var origin := Vector3(cell.x * SCENERY_CELL, 0, cell.y * SCENERY_CELL)
+				for i in range(transforms.size()):
+					var local: Transform3D = transforms[i]
+					local.origin -= origin
+					instances.set_instance_transform(i, local)
+				var renderer := MultiMeshInstance3D.new()
+				renderer.name = "Scenery_" + key
+				renderer.multimesh = instances
+				renderer.position = origin
+				renderer.material_override = mats[key]
+				renderer.visibility_range_end = 760
+				renderer.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+				add_child(renderer)
 	batches.clear()
