@@ -54,4 +54,4 @@ Install Git LFS before cloning so Git downloads the models, textures, fonts and 
 
 Run `python3 tools/run_tests.py` from the repository with Godot 4.7.2 and Python 3 on your path. Set `GODOT_BIN` to use a specific engine executable. The suite includes an entire delivery and return driven through the normal input system. The tests run offline with the bundled audio.
 
-GitHub Actions runs tests for pull requests and each commit pushed to a branch. Passing pushed commits are exported and published as separate prereleases. Android release signing uses the repository secrets `ANDROID_KEYSTORE_BASE64`, `ANDROID_KEY_ALIAS` and `ANDROID_KEY_PASSWORD`.
+GitHub Actions runs tests for pull requests and each commit pushed to a branch. Before publishing a commit as a prerelease, Actions starts the packaged game on Linux, Windows, and macOS and verifies the Android APK signature and manifest. Android release signing uses the repository secrets `ANDROID_KEYSTORE_BASE64`, `ANDROID_KEY_ALIAS` and `ANDROID_KEY_PASSWORD`.

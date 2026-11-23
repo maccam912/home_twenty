@@ -22,8 +22,8 @@ if os.environ["GITHUB_EVENT_NAME"] == "push":
     ).splitlines() or [head]
 
 # Each matrix job normally tests one commit. Larger pushes share runners while
-# remaining within GitHub's maximum of 256 matrix jobs.
-width = max(1, math.ceil(len(commits) / 256))
+# leaving room for both native operating systems in GitHub's 256-job matrix.
+width = max(1, math.ceil(len(commits) / 128))
 batches = []
 for start in range(0, len(commits), width):
     batch = [{"sha": sha, "index": start + i} for i, sha in enumerate(commits[start:start + width])]

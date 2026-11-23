@@ -1,6 +1,7 @@
 """Test each pushed checkout and package successful builds separately."""
 import json
 import os
+import re
 import subprocess
 import sys
 import tarfile
@@ -13,18 +14,32 @@ def run(args, cwd):
     subprocess.run([str(x) for x in args], cwd=cwd, check=True)
 
 
+def stamp_android_version(presets, sha, code):
+    # Keep original Godot serialization intact, including all other export presets.
+    settings = presets.read_text()
+    sections = re.split(r"(?m)^(\[preset\.\d+(?:\.options)?\])$", settings)
+    for header, body in zip(sections[1::2], sections[2::2]):
+        if not re.search(r'(?m)^name="Android"$', body):
+            continue
+        options = sections.index(header[:-1] + ".options]") + 1
+        body = sections[options]
+        body, codes = re.subn(r"(?m)^version/code=\d+$", f"version/code={code}", body)
+        body, names = re.subn(r'(?m)^version/name="([^"]*)"$',
+                              lambda m: f'version/name="{m[1]}+{sha[:12]}"', body)
+        if codes != 1 or names != 1:
+            raise ValueError("Missing or duplicate version fields in the Android export preset")
+        sections[options] = body
+        presets.write_text("".join(sections))
+        return
+    raise ValueError("Missing Android export preset")
+
+
 def package(checkout, output, sha, index):
     output.mkdir(parents=True)
     engine = os.environ["GODOT_BIN"]
     # Keep the APK upgradeable and expose its source revision in Android settings.
-    presets = checkout / "export_presets.cfg"
-    first = "version/code=1\n"
-    settings = presets.read_text()
-    if first not in settings or 'version/name="0.1.0"' not in settings:
-        raise ValueError("Update CI version stamping to match the Android preset")
     code = int(os.environ["GITHUB_RUN_NUMBER"]) * 4096 + index
-    settings = settings.replace(first, f"version/code={code}\n", 1)
-    presets.write_text(settings.replace('version/name="0.1.0"', f'version/name="0.1.0+{sha[:12]}"', 1))
+    stamp_android_version(checkout / "export_presets.cfg", sha, code)
     binary_dir = output.parent / f"{sha}-binaries"
     binary_dir.mkdir()
     linux = binary_dir / "HomeTwenty.x86_64"
