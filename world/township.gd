@@ -1,6 +1,7 @@
 extends Node3D
 
 const Route = preload("res://world/route.gd")
+const Roadside = preload("res://world/roadside.gd")
 const BECK_TANK = preload("res://world/props/beck_tank.tscn")
 const BECK_MAILBOX = preload("res://world/props/beck_mailbox.tscn")
 const DRIFT_TILE := 96.0
@@ -54,6 +55,7 @@ func _ready() -> void:
 	for medium: ShaderMaterial in [flake_material, drift_material]:
 		medium.set_shader_parameter("yard_lamps", lamp_centers)
 	_tree_lines()
+	_ditch_grass()
 	_flush_meshes()
 
 func _materials() -> void:
@@ -186,15 +188,17 @@ func _ground_snow() -> void:
 			tile.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 			ground_snow.add_child(tile)
 
-func set_truck_pose(at: Vector3, forward: Vector3) -> void:
-	var flat_heading := Vector3(forward.x,0,forward.z)
-	if not at.is_finite() or not flat_heading.is_finite() or flat_heading.is_zero_approx():
+func set_truck_pose(at: Vector3, forward: Vector3, up := Vector3.UP) -> void:
+	var right := forward.cross(up)
+	if not at.is_finite() or not right.is_finite() or right.is_zero_approx():
 		return
 	truck_position = at
-	truck_forward = flat_heading.normalized()
+	truck_forward = forward.normalized()
+	var lamp_up := right.normalized().cross(truck_forward)
 	for medium: ShaderMaterial in [flake_material,drift_material]:
 		medium.set_shader_parameter("truck_position", truck_position)
 		medium.set_shader_parameter("truck_forward", truck_forward)
+		medium.set_shader_parameter("truck_up", lamp_up)
 
 func _process(delta: float) -> void:
 	storm_seconds += delta
@@ -218,28 +222,17 @@ func _process(delta: float) -> void:
 func _snowfield() -> void:
 	var middle_z := (Route.ROAD_NORTH_Z + Route.ROAD_SOUTH_Z) * .5
 	var length := Route.ROAD_SOUTH_Z - Route.ROAD_NORTH_Z
-	_box(Vector3(0,-.12,middle_z), Vector3(3400,.23,length+2400), "snow")
-	_block("Snow ground", Vector3(0,-.26,middle_z), Vector3(1400,.52,length+170))
+	var ground := Roadside.new()
+	ground.build(mats.snow)
+	add_child(ground)
 	for x in [-695.0,695.0]:
 		_block("Field edge", Vector3(x,1.6,middle_z), Vector3(2,5,length+170))
 	for z in [Route.ROAD_NORTH_Z-80.0, Route.ROAD_SOUTH_Z+80.0]:
 		_block("Far field edge", Vector3(0,1.6,z), Vector3(1400,5,2))
 
-	# Low shoulder ridges follow the ditched road. Leave breaks for the approaches.
-	for side: int in [-1,1]:
-		var z := Route.ROAD_NORTH_Z
-		while z < Route.ROAD_SOUTH_Z:
-			var ridge_length := rng.randf_range(8.0,23.0)
-			z += ridge_length*.5
-			var entrance := Route.HOME_Z if side < 0 else Route.BECK_Z
-			if absf(z-entrance) > ridge_length*.5+7.0:
-				var width := rng.randf_range(1.6,3.9)
-				var x := side * (4.35 + width*.5 + rng.randf_range(0,1.4))
-				_drift(Vector3(x,-.015,z),Vector3(width,rng.randf_range(.15,.57),ridge_length),PI if side < 0 else 0.0)
-			z += ridge_length*.5 + rng.randf_range(1.0,9.0)
 	# Shallow sheets across the flats catch the ambient light. The horizon stays level.
 	for i in range(175):
-		var x := rng.randf_range(21,590) * (-1 if i%2 else 1)
+		var x := rng.randf_range(42,590) * (-1 if i%2 else 1)
 		var z := rng.randf_range(Route.ROAD_NORTH_Z-100,Route.ROAD_SOUTH_Z+100)
 		if (x > 0 and absf(z-Route.BECK_Z)<34) or (x < 0 and absf(z-Route.HOME_Z)<32):
 			continue
@@ -399,6 +392,7 @@ func _road_furniture() -> void:
 	var last_span := ceili((first_z-Route.ROAD_NORTH_Z)/46.0)
 	for span in range(first_span,last_span+1):
 		var p := Vector3(-8.8 - sin(span*.57)*.24,0,first_z-span*46.0)
+		p.y = Roadside.height_at(p.x, p.z)
 		var near_home := is_equal_approx(p.z,Route.HOME_Z+13)
 		var near_beck := is_equal_approx(p.z,Route.BECK_Z+13)
 		_utility_pole(p, near_home or near_beck)
@@ -431,6 +425,7 @@ func _road_furniture() -> void:
 	add_child(beck_box)
 	_road_sign(Vector3(5.7,0,Route.HOME_Z-45.0))
 	var s := Vector3(6.15,0,Route.BECK_Z-5.3)
+	s.y = Roadside.height_at(s.x, s.z)
 	_box(s+Vector3(0,1.17,0),Vector3(.12,2.34,.12),"galv")
 	_box(s+Vector3(0,2.30,0),Vector3(2.22,.40,.07),"green")
 	_box(s+Vector3(0,2.52,0),Vector3(2.25,.05,.13),"snow")
@@ -443,8 +438,10 @@ func _road_furniture() -> void:
 func _feed_sign() -> void:
 	var mount := Transform3D(Basis(Vector3.UP,-.32),Vector3(9.3,0,Route.COOP_Z))
 	for x:float in [-1.4,1.4]:
-		_local(mount,Vector3(x,1.37,0),Vector3(.19,2.74,.19),"creosote")
-		_block("Co-op signpost",mount*Vector3(x,.9,0),Vector3(.2,1.8,.2))
+		var foot := mount * Vector3(x, 0, 0)
+		var grade := Roadside.height_at(foot.x, foot.z)
+		_local(mount,Vector3(x,(2.74+grade)*.5,0),Vector3(.19,2.74-grade,.19),"creosote")
+		_block("Co-op signpost",mount*Vector3(x,(1.8+grade)*.5,0),Vector3(.2,1.8-grade,.2))
 	_local(mount,Vector3(0,2.36,.04),Vector3(3.95,1.83,.15),"wood")
 	_local(mount,Vector3(0,3.30,.05),Vector3(4.03,.12,.24),"snow")
 	var mat := StandardMaterial3D.new()
@@ -484,11 +481,13 @@ func _cb_mast(base: Vector3) -> void:
 		_beam(base+Vector3.UP*10.6,base+Vector3.UP*9.7+dx*1.5,0.043,"galv")
 
 func _snow_stake(at: Vector3) -> void:
+	at.y = Roadside.height_at(at.x, at.z)
 	var tilt := rng.randf_range(-0.12,0.12)
 	_box(at+Vector3(0,0.68,0),Vector3(0.055,1.38,0.06),"stake",Vector3(0,0,tilt))
 	_box(at+Vector3(-tilt*0.52,1.22,0),Vector3(0.067,0.21,0.073),"reflector",Vector3(0,0,tilt))
 
 func _road_sign(at: Vector3) -> void:
+	at.y = Roadside.height_at(at.x, at.z)
 	_box(at+Vector3(0,1.01,0),Vector3(0.11,2.02,0.11),"metal")
 	_box(at+Vector3(0,1.97,0),Vector3(0.76,0.86,0.072),"trim")
 	_box(at+Vector3(0,1.97,0.045),Vector3(0.68,0.78,0.025),"black")
@@ -555,9 +554,59 @@ func _tree_lines() -> void:
 			continue
 		for j in range(rng.randi_range(3,8)):
 			var base := Vector3(x+rng.randf_range(-1.2,1.2),.08,z+rng.randf_range(-.9,.9))
+			base.y = Roadside.height_at(base.x, base.z) - .02
 			var stem := base+Vector3(rng.randf_range(-.15,.26),rng.randf_range(.25,.65),rng.randf_range(-.14,.03))
 			_beam(base,stem,.031,"grass")
 			_beam(base.lerp(stem,.62),stem+Vector3(.15,-.13,.06),.025,"grass")
+
+# Lodged sedge marks the drainage line in broken stands. Individual springy
+# leaves lie across one another, with just their tips showing in the deeper fills.
+func _ditch_grass() -> void:
+	var straw := StandardMaterial3D.new()
+	straw.cull_mode = BaseMaterial3D.CULL_DISABLED
+	straw.vertex_color_use_as_albedo = true
+	straw.roughness = 1.0
+	mats["sedge"] = straw
+	var clumps := [_sedge_clump(), _sedge_clump(), _sedge_clump()]
+	for side: int in [-1, 1]:
+		var z := Route.ROAD_NORTH_Z + rng.randf_range(4, 22)
+		while z < Route.ROAD_SOUTH_Z:
+			var patch_length := rng.randf_range(4, 19)
+			var distance := rng.randf_range(8.2, 11.8)
+			for i in range(ceili(patch_length * .93)):
+				var along := z + rng.randf_range(0, patch_length)
+				var x := side * (distance + rng.randf_range(-.8, .8))
+				var grade := Roadside.height_at(x, along)
+				if grade > -.22:
+					continue
+				var tussock := Vector3(x, grade - .03, along)
+				var height := rng.randf_range(.68, 1.24)
+				_shape(clumps[rng.randi_range(0, 2)], tussock, Vector3(1,height,1), "sedge", Vector3(0,rng.randf_range(-.65,.65),0))
+			z += patch_length + rng.randf_range(9, 57)
+
+
+func _sedge_clump() -> ArrayMesh:
+	var stems := SurfaceTool.new()
+	stems.begin(Mesh.PRIMITIVE_TRIANGLES)
+	for leaf in 15:
+		var yaw := rng.randf() * TAU
+		var direction := Vector3(sin(yaw), 0, cos(yaw))
+		var root := direction * rng.randf_range(.02, .22)
+		var rise := rng.randf_range(.18, .59)
+		var lean := direction * rng.randf_range(.13, .42) + Vector3.RIGHT * .19
+		var half_width := direction.cross(Vector3.UP) * rng.randf_range(.015, .031)
+		var knee := root + lean * .5 + Vector3.UP * rise
+		var tip := root + lean + Vector3.UP * rise * rng.randf_range(.47, 1.2)
+		var color := Color("#87755b").lerp(Color("#c5ab79"), rng.randf())
+		for v: Vector3 in [root-half_width, root+half_width, knee-half_width*.54,
+				root+half_width, knee+half_width*.54, knee-half_width*.54,
+				knee-half_width*.54, knee+half_width*.54, tip]:
+			stems.set_color(color)
+			stems.set_normal((Vector3.UP + direction * .45).normalized())
+			stems.add_vertex(v)
+	stems.index()
+	return stems.commit()
+
 
 func _load_woodlot() -> void:
 	# The Blender layout holds each sculpt at its own workbench position.

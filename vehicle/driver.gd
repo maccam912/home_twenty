@@ -7,8 +7,9 @@ signal collapse_recovered
 
 const TruckMesh = preload("res://vehicle/truck_mesh.gd")
 const Route = preload("res://world/route.gd")
+const Roadside = preload("res://world/roadside.gd")
 const TRUCK_START := Vector3(Route.HOME_PARK.x, 0.0, Route.HOME_PARK.y)
-const WHEELBASE := 3.24
+const WHEELBASE := TruckMesh.REAR_AXLE_Z - TruckMesh.FRONT_AXLE_Z
 const WALK_SPEED := 2.9
 
 var in_cab := true
@@ -85,7 +86,7 @@ func get_driver_position() -> Vector3:
 
 
 func get_blade_position() -> Vector3:
-	return _truck.to_global(Vector3(0, 0.12, -3.23))
+	return _model.blade_position()
 
 
 func set_storm_strength(strength: float) -> void:
@@ -94,6 +95,10 @@ func set_storm_strength(strength: float) -> void:
 
 func get_forward() -> Vector3:
 	return -_truck.global_basis.z.normalized()
+
+
+func get_truck_up() -> Vector3:
+	return _truck.global_basis.y.normalized()
 
 
 func _unhandled_input(event: InputEvent) -> void:
@@ -165,12 +170,36 @@ func _drive(delta: float) -> void:
 	speed_mps = move_toward(speed_mps, target, acceleration * delta)
 	var angle := _steering * lerpf(0.58, 0.31, clampf(absf(speed_mps) / 14.0, 0, 1))
 	var turn_rate := -speed_mps * tan(angle) / WHEELBASE
-	_truck.rotation.y += turn_rate * delta
-	var forward := get_forward()
+	var yaw := _truck.rotation.y + turn_rate * delta
+	_truck.rotation.y = yaw
+	var forward := Vector3.FORWARD.rotated(Vector3.UP, yaw)
 	_truck.velocity = forward * speed_mps
 	if _truck.move_and_slide():
 		# Keep the tangent component when glancing off a fence or parked car.
 		speed_mps = _truck.get_real_velocity().dot(forward)
+	_ground_truck(forward)
+
+
+func _ground_height(at: Vector3) -> float:
+	return Roadside.height_at(at.x, at.z)
+
+
+func _ground_truck(forward: Vector3) -> void:
+	# Fit the chassis to its four tire contacts across both slopes of the ditch.
+	var center := _truck.global_position
+	var front := center - forward * TruckMesh.FRONT_AXLE_Z
+	var rear := center - forward * TruckMesh.REAR_AXLE_Z
+	var half_axle := forward.cross(Vector3.UP) * TruckMesh.HALF_TRACK
+	var front_left := _ground_height(front - half_axle)
+	var front_right := _ground_height(front + half_axle)
+	var rear_left := _ground_height(rear - half_axle)
+	var rear_right := _ground_height(rear + half_axle)
+	var front_height := (front_left + front_right) * 0.5
+	var rear_height := (rear_left + rear_right) * 0.5
+	var cross_rise := (front_right - front_left + rear_right - rear_left) * 0.5
+	_truck.global_position.y = lerpf(front_height, rear_height, -TruckMesh.FRONT_AXLE_Z / WHEELBASE)
+	_truck.rotation.x = atan2(front_height - rear_height, WHEELBASE)
+	_truck.rotation.z = atan2(cross_rise, 2.0 * TruckMesh.HALF_TRACK)
 
 
 func _walk(delta: float) -> void:
@@ -180,6 +209,7 @@ func _walk(delta: float) -> void:
 	var direction := Vector3.FORWARD.rotated(Vector3.UP, _walk_yaw)
 	_walker.velocity = direction * walk * WALK_SPEED
 	_walker.move_and_slide()
+	_walker.global_position.y = _ground_height(_walker.global_position)
 	_walk_phase = fmod(_walk_phase + _walker.get_real_velocity().length() * delta * 2.8, TAU)
 
 
@@ -187,10 +217,12 @@ func _leave_truck() -> void:
 	var space := get_world_3d().direct_space_state
 	var query := PhysicsShapeQueryParameters3D.new()
 	query.shape = _walker_shape.shape
+	query.collision_mask = _walker.collision_mask
 	query.exclude = [_walker.get_rid(), _truck.get_rid()]
 	# Try both doors, then the tailgate if the truck stopped beside an obstruction.
 	for offset: Vector3 in [Vector3(-1.57, 0, -0.25), Vector3(1.57, 0, -0.25), Vector3(-1.58, 0, 1.10), Vector3(1.58, 0, 1.10), Vector3(0, 0, 3.21)]:
 		var spot := _truck.to_global(offset)
+		spot.y = _ground_height(spot)
 		query.transform = Transform3D(Basis.IDENTITY, spot + _walker_shape.position)
 		if not space.intersect_shape(query, 1).is_empty():
 			continue
@@ -230,8 +262,8 @@ func _place_camera(delta: float, snap := false) -> void:
 	_mouse_idle = maxf(0.0, _mouse_idle - delta)
 	if _cab_view:
 		_camera.fov = 75
-		_camera.global_position = _truck.to_global(Vector3(-0.475, 1.76, -0.287))
-		_camera.global_rotation = Vector3(_cab_pitch - 0.085, _truck.global_rotation.y + _cab_yaw, 0)
+		var cab_look := Basis.from_euler(Vector3(_cab_pitch - 0.085, _cab_yaw, 0))
+		_camera.global_transform = _truck.global_transform * Transform3D(cab_look, Vector3(-0.475, 1.76, -0.287))
 		return
 	if _mouse_idle <= 0 and absf(speed_mps) > 0.5:
 		_orbit_yaw = lerp_angle(_orbit_yaw, 0.0, 1.0 - exp(-delta * 2.0))

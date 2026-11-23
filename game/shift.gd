@@ -244,7 +244,7 @@ func update_job_progress() -> void:
 			soundscape.play_cue("radio_squelch")
 
 func _physics_process(delta: float) -> void:
-	town.set_truck_pose(driver.get_truck_position(), driver.get_forward())
+	town.set_truck_pose(driver.get_truck_position(), driver.get_forward(), driver.get_truck_up())
 	driver.set_storm_strength(town.gust_strength)
 	if mode!="drive":
 		return

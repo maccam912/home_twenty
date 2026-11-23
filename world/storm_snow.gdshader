@@ -17,6 +17,6 @@ void vertex() {
 void fragment() {
 	NORMAL = normalize(mat3(VIEW_MATRIX) * world_normal);
 	vec2 p = world_position.xz;
-	ALBEDO = field_snow(p) * snow_contact(p);
+	ALBEDO = field_snow(p) * COLOR.rgb * snow_contact(p);
 	ROUGHNESS = 1.0;
 }

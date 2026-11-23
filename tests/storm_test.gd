@@ -65,11 +65,13 @@ func _check_lamps(town: Township) -> void:
 		_expect(centers.size()==porches.size()+street_lamps.size(), "powder scattering must use the positions of the installed lights")
 
 func _check_beam(town: Township) -> void:
-	var at := Vector3(33.,0.,Route.BECK_Z)
-	town.set_truck_pose(at,Vector3(3.,.5,0.))
+	var at := Vector3(8.5, -.7, Route.BECK_Z + 90.)
+	var chassis := Basis.from_euler(Vector3(.12, -1.4, .17))
+	town.set_truck_pose(at, -chassis.z, chassis.y)
 	for surface: ShaderMaterial in [town.flake_material,town.drift_material]:
 		var position: Vector3 = surface.get_shader_parameter("truck_position")
 		var heading: Vector3 = surface.get_shader_parameter("truck_forward")
-		_expect(position==at and heading.is_equal_approx(Vector3.RIGHT), "lighting on snow must follow the plow when it turns onto Beck lane")
+		var up: Vector3 = surface.get_shader_parameter("truck_up")
+		_expect(position == at and heading.is_equal_approx(-chassis.z) and up.is_equal_approx(chassis.y), "light on blowing snow follows the pitched and banked headlights in a ditch")
 	town.set_truck_pose(Vector3.ZERO,Vector3.UP)
-	_expect(town.truck_position==at and town.truck_forward==Vector3.RIGHT, "a degenerate heading must preserve the last valid light volume")
+	_expect(town.truck_position == at and town.truck_forward.is_equal_approx(-chassis.z), "a degenerate heading must preserve the last valid light volume")

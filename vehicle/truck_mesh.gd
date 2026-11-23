@@ -1,6 +1,13 @@
 extends Node3D
 
 # All dimensions are metres. The driver sits on the left and the grille faces -Z.
+const Roadside = preload("res://world/roadside.gd")
+const FRONT_AXLE_Z := -1.70
+const REAR_AXLE_Z := 1.54
+const HALF_TRACK := 0.91
+const CUTTING_EDGE := Vector3(0, .047, -.270)
+const BLADE_WIDTH := 2.54
+
 var _colors: Dictionary = {}
 var _wheels: Array[Node3D] = []
 var _knuckles: Array[Node3D] = []
@@ -114,10 +121,10 @@ func _joint(p: Node3D, pos: Vector3) -> Node3D:
 func _chassis() -> void:
 	_box(self, Vector3(0, 0.56, 0.04), Vector3(1.35, 0.28, 4.86), "black")
 	# Axles and rocker boxes span the open space beneath the body.
-	for z: float in [-1.70, 1.54]:
+	for z: float in [FRONT_AXLE_Z, REAR_AXLE_Z]:
 		_box(self, Vector3(0, 0.47, z), Vector3(1.84, 0.16, 0.18), "steel")
 		for s: float in [-1.0, 1.0]:
-			var steer := _joint(self, Vector3(s * 0.91, 0.47, z))
+			var steer := _joint(self, Vector3(s * HALF_TRACK, 0.47, z))
 			if z < 0:
 				_knuckles.append(steer)
 			var tire := _joint(steer, Vector3.ZERO)
@@ -329,7 +336,7 @@ func _front_end() -> void:
 		for i in range(3):
 			_box(self, Vector3(s * 0.74 - 0.092 + i * 0.09, 1.246, -2.57), Vector3(0.013, 0.165, 0.006), "cream")
 		# Contoured fender lip above each tire, leaving the rubber visible below it.
-		for axle: float in [-1.70, 1.54]:
+		for axle: float in [FRONT_AXLE_Z, REAR_AXLE_Z]:
 			for i in range(6):
 				var a := PI * i / 6.0
 				var b := PI * (i + 1) / 6.0
@@ -344,11 +351,11 @@ func _make_plow() -> void:
 	_plow = _joint(self, Vector3(0, 0.40, -3.07))
 	_plow.rotation.y = deg_to_rad(-10)
 	# The blade is a series of curved moldboard strips with a worn cutting edge.
-	var profile: Array[Vector2] = [Vector2(0.047, -0.270), Vector2(0.19, -0.091), Vector2(0.42, -0.015), Vector2(0.64, -0.035), Vector2(0.77, -0.128)]
+	var profile: Array[Vector2] = [Vector2(CUTTING_EDGE.y, CUTTING_EDGE.z), Vector2(0.19, -0.091), Vector2(0.42, -0.015), Vector2(0.64, -0.035), Vector2(0.77, -0.128)]
 	for i in range(profile.size() - 1):
 		var a := Vector3(0, profile[i].x, profile[i].y)
 		var b := Vector3(0, profile[i + 1].x, profile[i + 1].y)
-		_bar(_plow, a, b, 2.54, 0.06, "orange" if i > 0 else "cut")
+		_bar(_plow, a, b, BLADE_WIDTH, 0.06, "orange" if i > 0 else "cut")
 	_box(_plow, Vector3(0, 0.773, -0.127), Vector3(2.57, 0.057, 0.078), "rubber")
 	for x: float in [-1.17, -0.68, 0.0, 0.68, 1.17]:
 		_bar(_plow, Vector3(x, 0.13, -0.08), Vector3(x, 0.66, 0.036), 0.072, 0.077, "rust")
@@ -403,12 +410,29 @@ func set_storm_strength(strength:float) -> void:
 		lamp.spot_range = lerpf(31.0,24.0,strength)
 
 
+func blade_position(across := 0.0) -> Vector3:
+	return _plow.to_global(CUTTING_EDGE + Vector3.RIGHT * across)
+
+
+func _float_plow(lowered: bool, delta: float) -> void:
+	# The angled cutting edge can meet the far bank while the front axle is
+	# still in the hollow. Its skids ride up immediately and settle on the lift.
+	var lift_to_ground := -INF
+	for across: float in [-BLADE_WIDTH / 2, 0.0, BLADE_WIDTH / 2]:
+		var edge := blade_position(across)
+		var height := Roadside.height_at(edge.x, edge.z)
+		lift_to_ground = maxf(lift_to_ground, height + CUTTING_EDGE.y - edge.y)
+	var ground_stop := _plow.position.y + lift_to_ground / global_basis.y.y
+	var target := maxf(ground_stop, -.18) if lowered else .40
+	_plow.position.y = maxf(ground_stop, move_toward(_plow.position.y, target, .8 * delta))
+
+
 func animate(delta: float, speed: float, steering: float, lowered: bool) -> void:
 	_lamp_time = fmod(_lamp_time + delta * 5.0, TAU)
 	_tire_rotation = fmod(_tire_rotation - speed * delta / 0.46, TAU)
 	_beacon_rotor.rotation.y = _lamp_time
 	_beacon_light.light_energy = 0.16 + 0.76 * pow(0.5 + 0.5 * cos(_lamp_time), 4)
-	_plow.position.y = move_toward(_plow.position.y, 0.0 if lowered else 0.40, 0.8 * delta)
+	_float_plow(lowered, delta)
 	for wheel in _wheels:
 		wheel.rotation.x = _tire_rotation
 	for knuckle in _knuckles:
