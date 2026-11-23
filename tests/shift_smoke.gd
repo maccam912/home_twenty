@@ -25,9 +25,13 @@ func _run() -> void:
 	current_scene = shift
 	await process_frame
 	check(shift.mode == "title", "Fresh game opens on its title screen")
-	await _tap(KEY_ENTER)
+	var full_route := "--route" in OS.get_cmdline_user_args()
+	if full_route:
+		await _tap(KEY_ENTER)
+	else:
+		await _test_title_audio()
 	check(shift.mode == "drive" and shift.stage == 0, "Starting the shift opens the first job")
-	if "--route" in OS.get_cmdline_user_args():
+	if full_route:
 		await _drive_delivery()
 		if failures == 0:
 			print("PASS: drove Q, cleared the Beck lane with the truck, walked to both porches and finished the route")
@@ -83,6 +87,49 @@ func _tap(keycode: Key) -> void:
 	await physics_frame
 
 
+func _active_playback(cue: String) -> AudioStreamPlayback:
+	var player := shift.soundscape.get_node_or_null(NodePath(cue)) as AudioStreamPlayer
+	if player and not player.stream_paused and player.has_stream_playback():
+		return player.get_stream_playback()
+	return null
+
+
+func _test_title_audio() -> void:
+	var wind := _active_playback("wind")
+	var gust := _active_playback("crosswind")
+	check(paused and wind != null and gust != null, "The parked title has wind while the shift is paused")
+	for cue in ["engine", "heater", "plow", "ignition", "plat_fold"]:
+		check(_active_playback(cue) == null, "%s stays quiet before the first action" % cue)
+
+	var capture := AudioEffectCapture.new()
+	capture.buffer_length = 1.0
+	AudioServer.add_bus_effect(0, capture)
+	var deadline := Time.get_ticks_msec() + 3000
+	while capture.get_frames_available() < 16384 and Time.get_ticks_msec() < deadline:
+		OS.delay_msec(10)
+		await process_frame
+	var samples := capture.get_buffer(capture.get_frames_available())
+	var peak := 0.0
+	for sample in samples:
+		peak = maxf(peak, maxf(absf(sample.x), absf(sample.y)))
+	AudioServer.remove_bus_effect(0, AudioServer.get_bus_effect_count(0) - 1)
+	check(samples.size() >= 16384 and peak > 0.002, "Wind reaches the master output on the paused title")
+
+	await _tap(KEY_M)
+	var opening_fold := _active_playback("plat_fold")
+	check(shift.mode == "book" and opening_fold != null, "Opening the plat from the title plays paper")
+	check(_active_playback("wind") == wind, "Wind continues under the plat")
+	await _tap(KEY_M)
+	var closing_fold := _active_playback("plat_fold")
+	check(shift.mode == "title" and closing_fold != null and closing_fold != opening_fold,
+			"Closing the plat plays a fresh paper fold")
+	await _tap(KEY_ENTER)
+	check(_active_playback("ignition") != null and _active_playback("engine") != null,
+			"Turning the key starts the ignition cue and the engine")
+	check(_active_playback("wind") == wind and _active_playback("crosswind") == gust,
+			"The same wind recordings carry through the title, plat, and ignition")
+
+
 func _test_cab() -> void:
 	check(shift.driver.in_cab, "Player starts in the truck")
 	var initial_blade: bool = shift.driver.blade_down
@@ -111,6 +158,7 @@ func _test_menus_and_driving() -> void:
 	check(shift.mode == "book", "M opens the plat book")
 	await _tap(KEY_M)
 	check(shift.mode == "drive", "Closing the plat book returns to the shift")
+	var ignition_before_pause := _active_playback("ignition")
 	await _tap(KEY_ESCAPE)
 	check(shift.mode == "pause", "Escape pauses the shift")
 	var parked: Vector3 = shift.driver.get_truck_position()
@@ -121,6 +169,9 @@ func _test_menus_and_driving() -> void:
 	check(shift.driver.get_truck_position().distance_to(parked) < 0.08, "The truck stays parked while paused")
 	await _tap(KEY_ESCAPE)
 	check(shift.mode == "drive", "Escape resumes the shift")
+	var ignition_after_resume := _active_playback("ignition")
+	check(ignition_after_resume == null or ignition_after_resume == ignition_before_pause,
+			"Resuming the shift leaves the ignition alone")
 	_key(KEY_W, true)
 	for tick in range(75):
 		await physics_frame

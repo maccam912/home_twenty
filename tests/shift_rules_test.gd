@@ -52,7 +52,8 @@ func _run() -> void:
 	shift.directions()
 	check(shift.hud.subtitle.contains("left"),"Return dispatch changes with job stage")
 	await _test_shoulder_crossing()
-	print("Shift rules: porch gates, cold, warmth, radio directions and ditch crossing; failures: ",failures)
+	await _test_fast_runoff()
+	print("Shift rules: porch gates, cold, warmth, radio directions, ditch crossing and shovel recovery; failures: ",failures)
 	await _finish()
 
 
@@ -110,3 +111,48 @@ func _test_shoulder_crossing() -> void:
 			break
 	_key(KEY_S, false)
 	check(truck.position.x < 2 and absf(truck.position.y) < .02 and truck.basis.y.dot(Vector3.UP) > .999, "Reversing out of the ditch returns the truck to level road")
+
+
+func _test_fast_runoff() -> void:
+	var driver = shift.driver
+	var truck: CharacterBody3D = driver._truck
+	truck.global_position = Vector3(0.0, 0.0, -540.0)
+	truck.rotation = Vector3.ZERO
+	await _tap(KEY_B)  # Raise the blade after the low-speed crossing.
+	_key(KEY_W, true)
+	for tick in 650:
+		await physics_frame
+	check(shift.hud.mph == 50 and shift.hud.low_grip, "County Q allows 50 mph and shows the low-grip speed range")
+	_key(KEY_D, true)
+	for tick in 240:
+		await physics_frame
+		if driver.stuck:
+			break
+	_key(KEY_W, false)
+	_key(KEY_D, false)
+	check(driver.stuck, "Taking a sharp turn at 50 sends the truck off Q into deep snow")
+	if not driver.stuck:
+		return
+	var buried_at: Vector3 = truck.global_position
+	await _tap(KEY_E)
+	await physics_frame
+	check(driver.can_dig_out() and shift.hud.prompt.contains("[F]"), "The driver can find the shovel action beside the wheel")
+	_key(KEY_F, true)
+	for tick in 70:
+		await physics_frame
+	_key(KEY_F, false)
+	await physics_frame
+	check(shift.cleared_scoops == 1 and driver.stuck, "Releasing the shovel preserves the first completed scoop")
+	_key(KEY_F, true)
+	for tick in 120:
+		await physics_frame
+	_key(KEY_F, false)
+	check(not driver.stuck and truck.global_position.is_equal_approx(buried_at), "Shoveling releases the wheels in place")
+	await _tap(KEY_E)
+	_key(KEY_S, true)
+	for tick in 300:
+		await physics_frame
+		if absf(truck.position.x) < 4.0:
+			break
+	_key(KEY_S, false)
+	check(driver.in_cab and absf(truck.position.x) < 4.0, "The driver can back the freed truck onto County Q")

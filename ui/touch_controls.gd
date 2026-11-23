@@ -24,6 +24,7 @@ var _in_cab := true
 var _blade_down := false
 var _near_truck := false
 var _can_knock := false
+var _can_dig := false
 var _unit := 1.0
 var _safe := Rect2()
 var _font: Font
@@ -56,14 +57,19 @@ func _sync() -> void:
 	var near: bool = not cab and driver_position.distance_to(shift.driver.get_truck_position()) <= 4.2
 	var position_xz := Vector2(driver_position.x, driver_position.z)
 	var porch: bool = not cab and (position_xz.distance_to(Route.BECK_PORCH) <= shift.PORCH_REACH or position_xz.distance_to(Route.HOME_PORCH) <= shift.PORCH_REACH)
+	var dig: bool = not cab and shift.driver.can_dig_out()
 	var safe := _safe_rect()
-	if safe != _safe or cab != _in_cab or blade != _blade_down or near != _near_truck or porch != _can_knock or _buttons.is_empty():
+	if safe != _safe or cab != _in_cab or blade != _blade_down or near != _near_truck or porch != _can_knock or dig != _can_dig or _buttons.is_empty():
 		_safe = safe
 		_in_cab = cab
 		_blade_down = blade
 		_near_truck = near
 		_can_knock = porch
+		_can_dig = dig
 		_layout()
+		for id in _held.keys():
+			if _held[id] != &"" and not _buttons.has(_held[id]):
+				_end(id)
 		queue_redraw()
 
 func _safe_rect() -> Rect2:
@@ -85,36 +91,31 @@ func _layout() -> void:
 		return
 	_unit = minf(_safe.size.x / 960.0, _safe.size.y / 540.0)
 	var span := _safe.size / _unit
-	var bottom := span.y - 14.0
-	_place(&"steer_left", Rect2(19, bottom - 67, 76, 67))
-	_place(&"steer_right", Rect2(101, bottom - 67, 76, 67))
-	_place(&"reverse", Rect2(span.x - 195, bottom - 67, 86, 67))
-	_place(&"accelerate", Rect2(span.x - 103, bottom - 73, 84, 73))
-	var actions: Array[StringName] = []
+	var bottom := span.y - 10.0
+	_place(&"steer_left", Rect2(12, bottom - 106, 116, 106))
+	_place(&"steer_right", Rect2(128, bottom - 106, 116, 106))
+	_place(&"reverse", Rect2(span.x - 250, bottom - 106, 116, 106))
+	_place(&"accelerate", Rect2(span.x - 126, bottom - 118, 114, 118))
+	# Keep the speed counter and subtitle column clear between the two thumbs.
+	var row_y := bottom - 96.0
 	if _in_cab:
-		actions.assign([&"blade", &"interact", &"camera_view", &"horn", &"dispatch"])
+		_place(&"blade", Rect2(256, row_y, 76, 78))
+		_place(&"interact", Rect2(340, row_y, 86, 78))
+		_place(&"dispatch", Rect2(span.x - 367, row_y, 105, 78))
+		_place(&"camera_view", Rect2(span.x - 380, 14, 80, 69))
+		_place(&"horn", Rect2(span.x - 292, 14, 80, 69))
 	else:
 		if _near_truck:
-			actions.append(&"interact")
+			_place(&"interact", Rect2(256, row_y, 112, 78))
+		if _can_dig:
+			_place(&"unstick", Rect2(span.x - 374, row_y, 112, 78))
 		if _can_knock:
-			actions.append(&"job")
-	var total := 0.0
-	for a in actions:
-		total += _button_width(a) + 6.0
-	var left := (span.x - total + 6.0) * 0.5
-	for a in actions:
-		var w := _button_width(a)
-		_place(a, Rect2(left, bottom - 84, w, 48))
-		left += w + 6.0
-	_place(&"plat", Rect2(span.x - 171, 61, 77, 44))
-	_place(&"pause_shift", Rect2(span.x - 88, 61, 69, 44))
-
-func _button_width(action: StringName) -> float:
-	if action == &"dispatch":
-		return 98
-	if action in [&"interact", &"job"]:
-		return 81
-	return 65
+			var knock := Rect2(span.x - 374, row_y, 112, 78)
+			if _can_dig:
+				knock = Rect2(span.x - 318, 14, 112, 69)
+			_place(&"job", knock)
+	_place(&"plat", Rect2(span.x - 198, 14, 94, 69))
+	_place(&"pause_shift", Rect2(span.x - 96, 14, 84, 69))
 
 func _place(action: StringName, r: Rect2) -> void:
 	_buttons[action] = Rect2(_safe.position + r.position * _unit, r.size * _unit)
@@ -230,12 +231,12 @@ func _draw() -> void:
 	if _in_cab:
 		_switch_panel()
 		_handset(_local_button(&"dispatch"), &"dispatch" in _held.values())
+		_key_face(&"camera_view")
+		_key_face(&"horn")
 	else:
-		for action in [&"interact", &"job"]:
+		for action in [&"interact", &"unstick", &"job"]:
 			if _buttons.has(action):
-				var outside := _local_button(action)
-				_chamfer(outside.grow(-1), 5, BEZEL)
-				_push_key(outside, action, action in _held.values())
+				_key_face(action)
 	_map_tab(_local_button(&"plat"))
 	_pause_control(_local_button(&"pause_shift"))
 	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
@@ -269,33 +270,30 @@ func _label(r: Rect2, wording: String, font_size: int, y: float, color: Color) -
 func _steering_controls(r: Rect2) -> void:
 	# A single sprung rocker can be rolled straight across with the thumb.
 	var center := r.get_center()
-	var plate := Rect2(r.position.x + 4, r.position.y + 8, r.size.x - 8, r.size.y - 12)
+	var plate := r.grow(-3)
 	_chamfer(plate, 13, RECESS)
 	_chamfer(plate.grow(-1.3), 12, BEZEL)
 	_chamfer(plate.grow(-3.1), 10, RUBBER)
 	for sign_x: int in [-1,1]:
 		var pressed := (&"steer_left" if sign_x < 0 else &"steer_right") in _held.values()
-		var x := center.x + sign_x * 37
-		var y := center.y + (4 if pressed else 1)
+		var x := center.x + sign_x * r.size.x * 0.25
+		var y := center.y + (3 if pressed else 0)
 		var p := Vector2(x,y)
 		var direction := Vector2(sign_x, 0)
-		var outline := PackedVector2Array([
-			p + direction * 31 + Vector2(0,-11), p + direction * 23 + Vector2(0,-18),
-			p - direction * 16 + Vector2(0,-18), p - direction * 25 + Vector2(0,-10),
-			p - direction * 25 + Vector2(0,14), p - direction * 18 + Vector2(0,18),
-			p + direction * 22 + Vector2(0,18), p + direction * 31 + Vector2(0,9)])
-		draw_colored_polygon(outline, Color("#414847") if not pressed else Color("#313736"))
-		draw_line(p - direction * 16 + Vector2(0,-17), p + direction * 22 + Vector2(0,-17), RUBBER_RIB, 1.8, true)
+		var key_size := Vector2(r.size.x * 0.5 - 16, r.size.y - 26)
+		var key := Rect2(p - key_size * 0.5, key_size)
+		_chamfer(key, 10, Color("#414847") if not pressed else Color("#313736"))
+		draw_line(key.position + Vector2(10,1), Vector2(key.end.x - 10,key.position.y + 1), RUBBER_RIB, 2, true)
 		for i in range(3):
-			var grip := p + direction * (17 + i * 3)
-			draw_line(grip - Vector2(0,6), grip + Vector2(0,6), RUBBER, 1.25)
-		draw_polyline(PackedVector2Array([p - direction * 5 + Vector2(0,-8), p + direction * 4, p - direction * 5 + Vector2(0,8)]), HONEY if pressed else LETTERING, 2.8, true)
-	draw_line(center + Vector2(0,-12), center + Vector2(0,14), RECESS, 2)
+			var grip := p + direction * (26 + i * 4)
+			draw_line(grip - Vector2(0,12), grip + Vector2(0,12), RUBBER, 2)
+		draw_polyline(PackedVector2Array([p - direction * 8 + Vector2(0,-14), p + direction * 7, p - direction * 8 + Vector2(0,14)]), HONEY if pressed else LETTERING, 4, true)
 
 
 func _pedal(r: Rect2, gas: bool, pressed: bool) -> void:
 	var c := r.get_center() + Vector2(0,2 if pressed else 0)
-	var shape := Rect2(c.x - (23 if gas else 34), c.y - (30 if gas else 21), 46 if gas else 68, 57 if gas else 43)
+	var face_size := Vector2(r.size.x - (20 if gas else 6), r.size.y - (8 if gas else 16))
+	var shape := Rect2(c - face_size * 0.5, face_size)
 	# The narrow accelerator has long channels; the wider brake has transverse ribs.
 	_chamfer(Rect2(shape.position + Vector2(-1,3), shape.size), 7, Color(0.08,0.10,0.10,0.72))
 	_chamfer(shape, 7, ALLOY if not pressed else HONEY)
@@ -303,20 +301,20 @@ func _pedal(r: Rect2, gas: bool, pressed: bool) -> void:
 	var top := shape.position.y
 	if gas:
 		for i in range(5):
-			var x := shape.position.x + 8 + i * 7
-			draw_line(Vector2(x + 1,top + 7),Vector2(x - 1,top + 32),RECESS,3.2,true)
-			draw_line(Vector2(x + 0.3,top + 7),Vector2(x - 1.7,top + 32),RUBBER_RIB,1,true)
+			var x := shape.position.x + shape.size.x * (i + 1) / 6.0
+			draw_line(Vector2(x + 1,top + 10),Vector2(x - 1,shape.end.y - 32),RECESS,4,true)
+			draw_line(Vector2(x,top + 10),Vector2(x - 2,shape.end.y - 32),RUBBER_RIB,1.2,true)
 	else:
-		for i in range(3):
-			var y := top + 7.0 + i * 4.7
-			draw_line(Vector2(shape.position.x + 8,y),Vector2(shape.end.x - 8,y),RUBBER_RIB,1.9)
-			draw_line(Vector2(shape.position.x + 8,y + 1.5),Vector2(shape.end.x - 8,y + 1.5),RECESS,1.1)
+		for i in range(5):
+			var y := top + 11.0 + i * 9.0
+			draw_line(Vector2(shape.position.x + 12,y),Vector2(shape.end.x - 12,y),RUBBER_RIB,2.8)
+			draw_line(Vector2(shape.position.x + 12,y + 2.2),Vector2(shape.end.x - 12,y + 2.2),RECESS,1.5)
 	var title := ("GAS" if gas else "BRAKE / REV") if _in_cab else ("WALK" if gas else "BACK")
-	_label(shape, title, 13 if gas else 12, shape.end.y - 5, HONEY if pressed else INSCRIPTION)
+	_label(shape, title, 20 if gas else 18, shape.end.y - 8, HONEY if pressed else LETTERING)
 
 
 func _switch_panel() -> void:
-	var plate := _local_button(&"blade").merge(_local_button(&"horn")).grow(1.5)
+	var plate := _local_button(&"blade").merge(_local_button(&"interact")).grow(1.5)
 	_chamfer(Rect2(plate.position + Vector2(0,2.8), plate.size), 5, Color(0.08,0.10,0.10,0.71))
 	_chamfer(plate, 5, ALLOY)
 	_chamfer(plate.grow(-1.2), 4, Color("#414b48"))
@@ -325,30 +323,36 @@ func _switch_panel() -> void:
 		_screw(Vector2(x,plate.position.y + 5))
 		_screw(Vector2(x,plate.end.y - 5))
 	_blade_lever(_local_button(&"blade"))
-	for action in [&"interact",&"camera_view",&"horn"]:
-		_push_key(_local_button(action),action,action in _held.values())
+	_push_key(_local_button(&"interact"),&"interact",&"interact" in _held.values())
+
+
+func _key_face(action: StringName) -> void:
+	var r := _local_button(action)
+	_chamfer(r.grow(-1), 5, BEZEL)
+	_push_key(r, action, action in _held.values())
 
 
 func _blade_lever(r: Rect2) -> void:
 	var c := r.get_center()
-	var x := c.x - 10
+	var x := c.x - 12
 	var top := r.position.y
-	_chamfer(Rect2(x - 7,top + 5,14,25),4,ALLOY)
-	_chamfer(Rect2(x - 5.5,top + 6.5,11,22),3,RECESS)
-	var end := Vector2(x, top + (26 if _blade_down else 8))
-	draw_line(Vector2(x,top + 18.5),end,Color("#b3b5a4"),4,true)
-	draw_circle(end + Vector2(0,0.8),5.1,RECESS)
-	draw_circle(end,4.65,LEVER_RED)
+	_chamfer(Rect2(x - 9,top + 9,18,39),5,ALLOY)
+	_chamfer(Rect2(x - 7,top + 11,14,35),4,RECESS)
+	var end := Vector2(x, top + (42 if _blade_down else 14))
+	draw_line(Vector2(x,top + 29),end,Color("#b3b5a4"),5,true)
+	draw_circle(end + Vector2(0,1),7.5,RECESS)
+	draw_circle(end,6.75,LEVER_RED)
 	draw_line(end + Vector2(-2,-1.6),end + Vector2(2,-1.6),Color("#df8d65"),1.2)
 	var legend := Rect2(c.x - 1,0,25,20)
-	_label(legend,"UP",9,top + 13,HONEY if not _blade_down else INSCRIPTION)
-	_label(legend,"DN",9,top + 28,HONEY if _blade_down else INSCRIPTION)
-	_label(r,"PLOW",13,r.end.y - 4,LETTERING)
+	_label(legend,"UP",13,top + 21,HONEY if not _blade_down else INSCRIPTION)
+	_label(legend,"DN",13,top + 46,HONEY if _blade_down else INSCRIPTION)
+	_label(r,"PLOW",18,r.end.y - 6,LETTERING)
 
 
 func _push_key(r: Rect2, action: StringName, down: bool) -> void:
 	var c := r.get_center()
-	var key := Rect2(c.x - 17,r.position.y + 5,34,23)
+	var key_size := Vector2(r.size.x * 0.7, r.size.y - 34.0)
+	var key := Rect2(c.x - key_size.x * 0.5,r.position.y + 6,key_size.x,key_size.y)
 	_chamfer(key, 3, RECESS)
 	_chamfer(Rect2(key.position + Vector2(1.5,2 if down else 0.4),key.size - Vector2(3,3)),2,Color("#757b6b") if down else Color("#929585"))
 	draw_line(key.position + Vector2(4,1.4),Vector2(key.end.x - 4,key.position.y + 1.4),Color("#afb09e"),1)
@@ -372,7 +376,12 @@ func _push_key(r: Rect2, action: StringName, down: bool) -> void:
 			wording = "KNOCK"
 			draw_rect(Rect2(p - Vector2(4,6),Vector2(8,12)),ink,false,1.4)
 			draw_circle(p + Vector2(2,1),0.9,ink)
-	_label(r,wording,13,r.end.y - 4,LETTERING)
+		&"unstick":
+			wording = "SHOVEL"
+			draw_line(p + Vector2(-3,3),p + Vector2(5,-5),ink,2,true)
+			draw_polyline(PackedVector2Array([p + Vector2(4,-6),p + Vector2(6,-8),p + Vector2(9,-5),p + Vector2(7,-3),p + Vector2(4,-6)]),ink,1.5,true)
+			draw_colored_polygon(PackedVector2Array([p + Vector2(-7,0),p + Vector2(0,7),p + Vector2(-7,10),p + Vector2(-10,7)]),ink)
+	_label(r,wording,18,r.end.y - 6,LETTERING)
 
 
 func _handset(r: Rect2, down: bool) -> void:
@@ -383,18 +392,18 @@ func _handset(r: Rect2, down: bool) -> void:
 	var p := h.position
 	var face := Rect2(p.x + 4,p.y + 4,h.size.x - 8,h.size.y - 8)
 	_chamfer(face,5,Color("#454b46"))
-	for i in range(5):
-		var y := p.y + 8.5 + i * 3.2
+	for i in range(6):
+		var y := p.y + 10.5 + i * 4.4
 		draw_line(Vector2(p.x + 10,y),Vector2(p.x + 38,y),RECESS,1.7)
 		draw_line(Vector2(p.x + 10,y + 1),Vector2(p.x + 38,y + 1),RUBBER_RIB,0.65)
 	var lamp := Vector2(h.end.x - 27,p.y + 14)
 	draw_circle(lamp,3.9,RECESS)
 	draw_circle(lamp,2.7,Color("#ff7655") if down else Color("#805047"))
-	_label(Rect2(h.end.x - 23,p.y,20,20),"TX",10,p.y + 17,INSCRIPTION)
-	var switch_box := Rect2(p.x + 8,h.end.y - 20,h.size.x - 16,16)
+	_label(Rect2(h.end.x - 23,p.y,20,20),"TX",12,p.y + 18,INSCRIPTION)
+	var switch_box := Rect2(p.x + 8,h.end.y - 31,h.size.x - 16,25)
 	_chamfer(switch_box,3,RECESS)
 	_chamfer(switch_box.grow(-1),2,Color("#555b54") if not down else RUBBER)
-	_label(switch_box,"ON AIR" if down else "HOLD CB",12,switch_box.end.y - 3,HONEY if down else LETTERING)
+	_label(switch_box,"ON AIR" if down else "HOLD CB",17,switch_box.end.y - 4,HONEY if down else LETTERING)
 
 
 func _map_tab(r: Rect2) -> void:
@@ -407,7 +416,7 @@ func _map_tab(r: Rect2) -> void:
 	var y := card.get_center().y
 	draw_polyline(PackedVector2Array([Vector2(x - 6,y + 5),Vector2(x - 6,y - 5),Vector2(x - 2,y - 7),Vector2(x + 2,y - 5),Vector2(x + 6,y - 7),Vector2(x + 6,y + 3),Vector2(x + 2,y + 5),Vector2(x - 2,y + 3),Vector2(x - 6,y + 5)]),RUBBER,1.2,true)
 	draw_line(Vector2(x - 2,y - 7),Vector2(x - 2,y + 3),RUBBER,0.9)
-	_label(Rect2(p.x + 28,p.y,card.size.x - 31,card.size.y),"PLAT",13,y + 4.6,RECESS)
+	_label(Rect2(p.x + 28,p.y,card.size.x - 31,card.size.y),"PLAT",18,y + 6,RECESS)
 
 
 func _pause_control(r: Rect2) -> void:
@@ -418,4 +427,4 @@ func _pause_control(r: Rect2) -> void:
 	draw_circle(center,7.8,RECESS)
 	draw_line(center + Vector2(-2.3,-3.6),center + Vector2(-2.3,3.6),INSCRIPTION,1.6)
 	draw_line(center + Vector2(2.3,-3.6),center + Vector2(2.3,3.6),INSCRIPTION,1.6)
-	_label(Rect2(face.position.x + 24,face.position.y,face.size.x - 27,face.size.y),"PAUSE",11,center.y + 4,INSCRIPTION)
+	_label(Rect2(face.position.x + 24,face.position.y,face.size.x - 27,face.size.y),"PAUSE",16,center.y + 6,INSCRIPTION)

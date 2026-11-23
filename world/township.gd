@@ -2,6 +2,7 @@ extends Node3D
 
 const Route = preload("res://world/route.gd")
 const Roadside = preload("res://world/roadside.gd")
+const TruckMesh = preload("res://vehicle/truck_mesh.gd")
 const BECK_TANK = preload("res://world/props/beck_tank.tscn")
 const BECK_MAILBOX = preload("res://world/props/beck_mailbox.tscn")
 const DRIFT_TILE := 96.0
@@ -16,6 +17,7 @@ var drum := CylinderMesh.new()
 var mound := SphereMesh.new()
 var gable: ArrayMesh
 var drift_forms: Array[ArrayMesh] = []
+var wheel_drifts: Array[MeshInstance3D] = []
 var tree_meshes: Dictionary[StringName, Mesh] = {}
 var mats := {}
 var batches := {}
@@ -243,6 +245,31 @@ func _snowfield() -> void:
 
 func _drift(at: Vector3, dims: Vector3, yaw: float) -> void:
 	_shape(drift_forms[rng.randi_range(0,drift_forms.size()-1)],at,dims,"snow",Vector3(0,yaw,0))
+
+func pack_wheel_snow(at: Vector3, forward: Vector3) -> void:
+	var right := forward.cross(Vector3.UP).normalized()
+	var index := 0
+	for axle: float in [TruckMesh.FRONT_AXLE_Z, TruckMesh.REAR_AXLE_Z]:
+		for side: float in [-1, 1]:
+			if wheel_drifts.size() <= index:
+				var mound_patch := MeshInstance3D.new()
+				mound_patch.mesh = drift_forms[index]
+				mound_patch.material_override = mats.snow
+				add_child(mound_patch)
+				wheel_drifts.append(mound_patch)
+			var patch := wheel_drifts[index]
+			var center := at - forward * axle + right * side * TruckMesh.HALF_TRACK
+			center.y = Roadside.height_at(center.x, center.z) - 0.08
+			patch.global_position = center
+			patch.rotation.y = atan2(-forward.x, -forward.z) + side * 0.25
+			patch.scale = Vector3(1.55, 0.73, 2.15)
+			patch.show()
+			index += 1
+
+func clear_wheel_snow(remaining: float) -> void:
+	for patch in wheel_drifts:
+		patch.visible = remaining > 0.0
+		patch.scale.y = 0.73 * maxf(remaining, 0.01)
 
 func _buildings() -> void:
 	_house(Route.HOME_HOUSE, PI / 2.0, "cream_siding", true)

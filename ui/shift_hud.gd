@@ -20,6 +20,7 @@ var opened := 0
 var cab := true
 var blade := false
 var mph := 0
+var low_grip := false
 var area := "COUNTY Q"
 var mic := false
 var prompt := ""
@@ -140,6 +141,7 @@ func _instruments() -> void:
 	draw_circle(center,51,Color("#5b625a"),true,-1,true)
 	draw_circle(center,48,DASH,true,-1,true)
 	draw_arc(center,44,deg_to_rad(154),deg_to_rad(383),37,Color("#7c8070"),1.1,true)
+	draw_arc(center,44,deg_to_rad(267.5),deg_to_rad(380),22,Color("#d99b56"),1.8,true)
 	for i in range(15):
 		var angle := deg_to_rad(155.0+i*(225.0/14.0))
 		var outer := Vector2.from_angle(angle)
@@ -166,7 +168,7 @@ func _odometer(x:float,y:float,speed:int) -> void:
 	_rect(x-4,y-1,67,24,DASH)
 	for i in 2:
 		_rect(x+i*13,y+2,12,18,Color("#131916"))
-		_text(x+2+i*13,y+17,("%02d" % speed)[i],GAUGE,17,SPEEDO)
+		_text(x+2+i*13,y+17,("%02d" % speed)[i],GAUGE,17,Color("#ffb464") if low_grip else SPEEDO)
 	_text(x+30,y+16,"MPH",GAUGE,12,Color("#b9c1ac"))
 
 func _radio_face() -> void:

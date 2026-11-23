@@ -19,6 +19,7 @@ To play from source, open the project in Godot 4.7 and press F6 on `game/shift.t
 | B | Raise or lower the plow. Push snow while moving forward. |
 | C | Switch between the cab and the chase camera. |
 | E | Stop and step outside, or get back in beside the truck. |
+| Hold F | Shovel packed snow away from a buried wheel while on foot. On Android, hold **SHOVEL**. |
 | H | Sound the truck horn. |
 | Hold R, then release | Transmit on the cab CB, then listen for Deb’s directions. |
 | X | Knock at a porch on foot. |
@@ -26,6 +27,8 @@ To play from source, open the project in Godot 4.7 and press F6 on `game/shift.t
 | Esc | Pause or resume. |
 
 Start up the home drive and turn left on County Q. The Beck mailbox is a mile north, past the co-op sign. Their unloading yard sits about 400 feet back from the road.
+
+With the blade up, the pickup can reach 50 mph on County Q. Above 35 mph the tires start sliding wide in turns and braking takes longer. Slow down before the farm entrances. If you bury the wheels in a drift, climb out, stand beside a tire and shovel three scoops. Get back in and ease onto the road.
 
 The blade cuts a continuous path where you drive it. At the Becks’, start at the mouth of the lane on Q and carry the pass through to the unloading area. Outside the truck, frost builds up. Return to the cab to warm up.
 
@@ -44,7 +47,7 @@ chmod 600 ~/.config/home-twenty/elevenlabs.key
 List cues with `python3 tools/generate_sfx.py --list`. To generate the sounds used in this shift, run:
 
 ```sh
-python3 tools/generate_sfx.py wind crosswind heater engine plow radio_key radio_squelch horn door blade_lift blade_drop
+python3 tools/generate_sfx.py wind crosswind heater engine ignition plat_fold plow shovel radio_key radio_squelch horn door blade_lift blade_drop
 ```
 
 Generated MP3s go to `audio/generated/`. Restart the project to load new sounds. To include new sounds in the standalone app, reimport the assets and export the macOS and Android presets again.

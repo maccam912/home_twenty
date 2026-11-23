@@ -2,7 +2,7 @@ extends SceneTree
 
 const Soundscape := preload("res://audio/soundscape.gd")
 const REQUIRED_CUES := ["wind", "crosswind", "heater", "engine", "plow", "radio_key",
-		"radio_squelch", "horn", "door", "blade_lift", "blade_drop"]
+		"radio_squelch", "horn", "door", "blade_lift", "blade_drop", "ignition", "plat_fold", "shovel"]
 var sound := Soundscape.new()
 var failures := 0
 var checks := 0
@@ -41,7 +41,7 @@ func _run() -> void:
 		if player == null:
 			continue
 		expect(player.stream is AudioStreamMP3 and player.stream.get_length() > 0.25, "Imported MP3 is empty: %s" % cue)
-		expect(not player.playing, "Title should be quiet: %s" % cue)
+		expect(player.playing == (cue in ["wind", "crosswind"]), "Only wind plays before ignition: %s" % cue)
 		expect(player.stream.loop == (cue in Soundscape.LOOPS), "Loop flag: %s" % cue)
 	if failures == 0:
 		var key_db := cue_rms_db("radio_key")
@@ -63,11 +63,12 @@ func _run() -> void:
 	quit(1 if failures else 0)
 
 func _check_mix() -> void:
+	sound.start_truck()
 	sound.update_state(true, 0.0, false)
 	sound.set_gust(1.0)
 	settle()
 	for cue in Soundscape.LOOPS:
-		expect(sound.get_node(NodePath(cue)).playing, "Loop starts on first driving update: %s" % cue)
+		expect(sound.get_node(NodePath(cue)).playing, "Loop is playing after ignition: %s" % cue)
 	var wind: AudioStreamPlayer = sound.get_node("wind")
 	var gust: AudioStreamPlayer = sound.get_node("crosswind")
 	var heater: AudioStreamPlayer = sound.get_node("heater")

@@ -13,6 +13,8 @@ var _wheels: Array[Node3D] = []
 var _knuckles: Array[Node3D] = []
 var _plow: Node3D
 var _wheel: Node3D
+var _shovel: Node3D
+var _shovel_rest: Transform3D
 var _needle: Node3D
 var _beacon_rotor: Node3D
 var _scatter := ShaderMaterial.new()
@@ -319,9 +321,28 @@ func _bed() -> void:
 	var toolbox := _box(self, Vector3(-0.40, 1.14, 0.94), Vector3(0.73, 0.22, 0.29), "steel")
 	_box(toolbox, Vector3(0, 0.113, 0), Vector3(0.76, 0.038, 0.318), "rim")
 	_box(toolbox, Vector3(0, 0.03, 0.148), Vector3(0.12, 0.049, 0.022), "black")
-	_bar(self, Vector3(0.66, 1.07, 2.42), Vector3(0.60, 1.16, 0.81), 0.047, 0.046, "sack")
-	var shovel := _box(self, Vector3(0.67, 1.062, 2.4), Vector3(0.264, 0.043, 0.327), "steel")
-	shovel.rotation.y = -0.06
+	_shovel = _joint(self, Vector3(0.60, 1.16, 0.81))
+	_shovel.rotation = Vector3(-0.06, PI + 0.04, 0)
+	_shovel_rest = _shovel.transform
+	_bar(_shovel, Vector3.ZERO, Vector3(0, 0, -1.51), 0.041, 0.041, "sack")
+	_box(_shovel, Vector3(0, 0, -1.56), Vector3(0.28, 0.025, 0.35), "steel")
+	for side in [-1.0, 1.0]:
+		_box(_shovel, Vector3(side * 0.132, 0.027, -1.54), Vector3(0.019, 0.065, 0.29), "steel").rotation.z = -side * 0.26
+	_box(_shovel, Vector3(0, 0.003, -1.72), Vector3(0.28, 0.02, 0.035), "cut")
+
+
+func set_shovel_stroke(camera: Camera3D, phase: float) -> void:
+	if phase < 0:
+		if _shovel.get_parent() != self:
+			_shovel.reparent(self, false)
+			_shovel.transform = _shovel_rest
+		return
+	if _shovel.get_parent() != camera:
+		_shovel.reparent(camera, false)
+	var scoop := sin(PI * clampf(phase, 0.0, 1.0))
+	var toss := sin(PI * smoothstep(0.45, 1.0, phase))
+	_shovel.position = Vector3(0.48, -0.40 - 0.20 * scoop, 0.16 - 0.18 * scoop)
+	_shovel.rotation = Vector3(-0.12 - 0.42 * scoop + 0.60 * toss, 0.12 - 0.28 * toss, -0.58 * toss)
 
 
 func _front_end() -> void:

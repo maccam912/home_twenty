@@ -2,6 +2,7 @@ extends SceneTree
 
 const Route = preload("res://world/route.gd")
 const SHIFT = preload("res://game/shift.tscn")
+const TouchControls = preload("res://ui/touch_controls.gd")
 var shift
 var controls
 var failures := PackedStringArray()
@@ -54,6 +55,9 @@ func _tap(id: int, position: Vector2) -> void:
 	await _advance()
 
 func _run() -> void:
+	_check_layout(Vector2(1200, 540), Rect2(46, 0, 1154, 526))
+	_check_layout(Vector2(960, 540), Rect2(0, 0, 960, 540))
+	_check_layout(Vector2(960, 720), Rect2(0, 12, 960, 694))
 	current_scene = null
 	shift = SHIFT.instantiate()
 	root.add_child(shift)
@@ -75,11 +79,40 @@ func _run() -> void:
 	OS.delay_msec(300)
 	await process_frame
 	if failures.is_empty():
-		print("PASS: touchscreen ignition, independent fingers, radio, menu cancellation and porch interaction")
+		print("PASS: touch target sizes, independent fingers, driving, walking, digging and menus")
 	else:
 		for failure in failures:
 			push_error(failure)
 	quit(0 if failures.is_empty() else 1)
+
+func _check_layout(screen: Vector2, safe: Rect2) -> void:
+	var layout := TouchControls.new()
+	layout._safe = safe
+	layout._near_truck = true
+	layout._can_knock = true
+	layout._can_dig = true
+	var hud_scale := minf(screen.x / 960.0, screen.y / 540.0)
+	var origin := (screen - Vector2(960, 540) * hud_scale) * 0.5
+	var reserved := [Rect2(18, 4, 244, 78), Rect2(178, 210, 604, 190), Rect2(446, 510, 70, 28)]
+	for cab in [true, false]:
+		layout._in_cab = cab
+		layout._layout()
+		var occupied: Array[Rect2] = []
+		for action in layout._buttons:
+			var r := layout._buttons[action]
+			var local_size := r.size / layout._unit
+			_expect(safe.encloses(r), "%s must stay inside the safe area at %s" % [action, screen])
+			if action in TouchControls.STEERING or action in TouchControls.PEDALS:
+				_expect(local_size.x >= 110 and local_size.y >= 100, "%s needs a full-size thumb target" % action)
+			else:
+				_expect(local_size.x >= 70 and local_size.y >= 64, "%s needs a full-size action button" % action)
+			for other in occupied:
+				_expect(not other.intersects(r), "%s overlaps another button at %s" % [action, screen])
+			for area: Rect2 in reserved:
+				var hud_area := Rect2(origin + area.position * hud_scale, area.size * hud_scale)
+				_expect(not hud_area.intersects(r), "%s covers the dispatch slip, subtitles, prompt or speedometer at %s" % [action, screen])
+			occupied.append(r)
+	layout.free()
 
 func _driving() -> void:
 	_finger(1,_button(&"accelerate"),true)
@@ -115,6 +148,29 @@ func _door() -> void:
 	await _tap(9,_button(&"interact"))
 	_expect(not shift.driver.in_cab and controls._buttons.has(&"interact") and not controls._buttons.has(&"blade"),"The open cab door should expose on-foot actions and hide the blade switch")
 	_expect(not controls._buttons.has(&"job"),"A player standing by the truck cannot knock on a distant porch")
+	_expect(not controls._buttons.has(&"unstick"),"A free truck has no shovel control")
+	var start: Vector3 = shift.driver.get_driver_position()
+	var yaw: float = shift.driver._walk_yaw
+	var step: Rect2 = controls._buttons[&"accelerate"]
+	var walk_corner: Vector2 = controls.get_global_transform_with_canvas() * (step.position + Vector2(7, 7) * controls._unit)
+	_finger(1,walk_corner,true)
+	_finger(2,_button(&"steer_left"),true)
+	for i in 12:
+		await physics_frame
+	_finger(1,walk_corner,false)
+	_finger(2,_button(&"steer_left"),false)
+	_expect(shift.driver.get_driver_position().distance_to(start) > 0.2 and absf(shift.driver._walk_yaw - yaw) > 0.1, "The outer corner of WALK must work while another finger turns")
+	shift.driver.stuck = true
+	shift.driver._walker.global_position = shift.driver._truck.to_global(Vector3(-1.5, 0, -1.4))
+	await _advance()
+	var dig := _button(&"unstick")
+	_finger(3,dig,true)
+	for i in ceili(shift.STROKE_SECONDS * shift.SHOVEL_STROKES * 60.0) + 12:
+		await physics_frame
+	await _advance()
+	_expect(not shift.driver.stuck and not controls._buttons.has(&"unstick"),"Holding SHOVEL at a buried wheel must free the truck and dismiss the button")
+	_expect(not Input.is_action_pressed("unstick"),"Finishing the dig must release the shovel action")
+	_finger(3,dig,false)
 	# Stage a walker's arrival at the porch; the route smoke test covers the full journey there.
 	shift.driver._walker.global_position = Vector3(Route.BECK_PORCH.x,0,Route.BECK_PORCH.y)
 	await _advance()
