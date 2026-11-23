@@ -64,10 +64,6 @@ job={
 "deadzone": 0.2,
 "events": [Object(InputEventKey,"physical_keycode":88)]
 }
-unstick={
-"deadzone": 0.2,
-"events": [Object(InputEventKey,"physical_keycode":70)]
-}
 plat={
 "deadzone": 0.2,
 "events": [Object(InputEventKey,"physical_keycode":77), Object(InputEventKey,"physical_keycode":4194306)]

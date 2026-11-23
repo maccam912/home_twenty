@@ -5,6 +5,27 @@ const Township = preload("res://world/township.gd")
 const BOUGH_TEXTURE = preload("res://world/trees/snow_bough.webp")
 var failures := 0
 
+# The headless renderer discards individual MultiMesh transforms. Inspect the
+# actual geometry as it enters the normal rendering batch, including far meshes.
+class SurveyedTown extends Township:
+	var crowns: Array[Rect2] = []
+	var roots := PackedVector2Array()
+	var orchards := 0
+
+	func _shape_at(mesh: Mesh, placement: Transform3D, material: String) -> void:
+		if material in ["tree_bark", "spruce_needles"]:
+			var bounds := placement * mesh.get_aabb()
+			crowns.append(Rect2(bounds.position.x, bounds.position.z, bounds.size.x, bounds.size.z))
+			if material == "tree_bark":
+				roots.append(Vector2(placement.origin.x, placement.origin.z))
+		super(mesh, placement, material)
+
+	func _block(title: String, at: Vector3, dims: Vector3, yaw := 0.0) -> void:
+		if title == "Apple trunk":
+			crowns.append(Rect2(Vector2(at.x, at.z) - Vector2.ONE * 2, Vector2(4, 4)))
+			orchards += 1
+		super(title, at, dims, yaw)
+
 func _initialize() -> void:
 	_run.call_deferred()
 
@@ -14,17 +35,18 @@ func expect(condition: bool, message: String) -> void:
 		push_error(message)
 
 func _run() -> void:
-	var town := Township.new()
+	var town := SurveyedTown.new()
 	root.add_child(town)
 	_check_imports(town)
 	_check_foliage(town)
 	_check_stands(town)
+	_check_survey(town)
 	await physics_frame
 	await physics_frame
 	_check_clearance(town)
-	town.free()
 	if failures == 0:
-		print("PASS: winter trees import at field scale, use cutout foliage and cheaper distant meshes, and leave both plow routes clear")
+		print("PASS: %d winter trees and %d orchard trees leave all roads, drives, and yards clear" % [town.roots.size(), town.orchards])
+	town.free()
 	quit(0 if failures == 0 else 1)
 
 func _check_imports(town: Node3D) -> void:
@@ -84,11 +106,37 @@ func _check_stands(town: Node3D) -> void:
 	expect(forms.size() >= 3 and forms.size() <= 6, "Spruce forms should be shared, instanced batches")
 	expect(count > 30 and cells.size() > 4, "The field stands are missing or lost instancing")
 
+func _check_survey(town: SurveyedTown) -> void:
+	for crown in town.crowns:
+		for surface in town.road_bounds:
+			if crown.intersects(surface, true):
+				expect(false, "Tree extends onto a driving surface near %s" % crown.get_center())
+				return
+	expect(town.orchards > 0, "The orchard crowns must participate in the road survey")
+	var stands := {}
+	var field_trees := 0
+	for point in town.roots:
+		var cell := Vector2i((point / 100.0).floor())
+		stands[cell] = stands.get(cell, 0) + 1
+		if not town._near_surface(point, 65):
+			field_trees += 1
+	expect(stands.values().max() >= 40 and field_trees >= 200, "Missing woods and stands between fields")
+	for road: Dictionary in Route.ROADS:
+		var nearby := 0
+		for point in town.roots:
+			if point.distance_to(Route._projection(point, road)) < 38:
+				nearby += 1
+				if nearby >= 5:
+					break
+		expect(nearby >= 5, "Missing roadside trees along " + road.name)
+
 func _check_clearance(town: Node3D) -> void:
 	var space := town.get_world_3d().direct_space_state
-	var trunk := PhysicsRayQueryParameters3D.create(Vector3(-83.0,1.4,Route.HOME_Z+13),Vector3(-81.0,1.4,Route.HOME_Z+13))
+	var trunk := PhysicsRayQueryParameters3D.create(Vector3(-83.0,1.4,Route.HOME_Z+16),Vector3(-81.0,1.4,Route.HOME_Z+16))
 	expect(not space.intersect_ray(trunk).is_empty(),"Roadside spruce lost its trunk collider")
 	var road := PhysicsRayQueryParameters3D.create(Vector3(0,1.4,Route.HOME_Z),Vector3(0,1.4,Route.BECK_Z))
 	expect(space.intersect_ray(road).is_empty(),"A collider blocks the middle of County Q")
 	var lane := PhysicsRayQueryParameters3D.create(Vector3(1,1.4,Route.BECK_Z),Vector3(Route.BECK_PARK.x,1.4,Route.BECK_Z))
 	expect(space.intersect_ray(lane).is_empty(),"A collider blocks the tank lane")
+	var bell := PhysicsRayQueryParameters3D.create(Vector3(355,1.4,-719.45), Vector3(455,1.4,-719.45), 1)
+	expect(space.intersect_ray(bell).is_empty(), "A collider blocks School Road approaching Bell School")

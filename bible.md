@@ -30,7 +30,7 @@ Deb's list is the spine of the game: small, concrete jobs you can lose yourself 
 
 - **The list.** Deb works from the kitchen table with the CB base station, the plat book and the town's contract list, and calls you with the next job.
 - **Job types.** Clear a driveway on contract. Open a path to a propane tank so the delivery truck can fill it. Pull a car out of the ditch. Check on someone who isn't answering the phone. Open a road for an ambulance. Clear the lane to a barn.
-- **The truck.** A 1990s F-150 4x4 with a light 7½-foot blade, sandbags in the bed for traction, and a chain and shovel behind the seat. It's right for driveways and struggles in deep, unplowed snow.
+- **The truck.** A 1990s F-150 4x4 with a light 7½-foot blade, sandbags in the bed for traction, and a tow chain behind the seat. Deep snow slows it to a crawl. Straighten the wheels to pull back up the shoulder, or reverse out of the drift.
 - **No deadline.** Nothing is timed. The list grows, and Deb doesn't nag; she just adds.
 - **Cleared stays cleared.** Once you plow a road or drive, it stays open while the snow everywhere else keeps deepening. Your plowed roads become a map of where you've been, and a sure way back.
 - **Windrows and mailboxes.** Clean up the ridge your blade leaves across a drive and people notice. Knock down a mailbox and you can come back and fix it.
@@ -73,11 +73,10 @@ Stopping is the game's real verb. It is never punished, and it's the main way yo
 The cab is safe and warm. Outside, the cold is the only physical threat and the source of most of the urgency.
 
 - **Warmth you see, not a meter.** Your breath fogs, frost creeps in from the screen edges, and your hands shake, which makes chains, pilot lights and latches harder.
-- **What drains it.** Wind, being wet, and sweating while you shovel. The shelter of a building buys time.
+- **What drains it.** Wind and wet clothes. The shelter of a building buys time.
 - **What restores it.** The cab heater, a kitchen with the stove going, and a thermos with a few pours.
 - **Whiteout.** In a gust you can lose sight of the truck within twenty steps. The amber strobe and the horn are your lighthouse.
 - **The rope line.** An early upgrade: rope you tie off at the truck and pay out as you walk, the way farm families once strung lines between house and barn in blizzards.
-- **The buried tailpipe.** Get stuck in deep snow with the engine running and snow can block your exhaust. The screen dims and you get drowsy until you dig it clear.
 - **Fuel.** An empty tank means no heater.
 - **Collapse is not death.** Go down in the cold and you wake in your cab with the door shut and the heater running. A set of boot prints leads away, toward the old road. You lose time, and the mystery gains a thread.
 
@@ -87,6 +86,7 @@ There's no GPS or minimap, but Ask Deb means you're never stuck.
 
 - **The plat book.** Your copy rides on the dash and Deb has the other. Each shows the landowner's name on every parcel, and you mark yours up: houses, hazards, people.
 - **The survey grid.** Roads follow the one-mile section grid, so you navigate by counting crossings. Anything that runs at a slant across the grid is wrong.
+- **Road edges.** A drainage ditch runs down each shoulder and opens at drives and crossroads. When the fields disappear into blowing snow, you can still follow those two lines in the headlights.
 - **Landmarks in the fog.** You can see 50–150 meters, so landmarks are silhouettes: silos, steeples, the feed mill, water towers, ginseng shade frames.
 - **Your own plowed roads.** Cleared stays cleared, so the roads you've opened are always a trail back to somewhere you know.
 

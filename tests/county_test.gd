@@ -22,6 +22,7 @@ func _run() -> void:
 	await physics_frame
 	_check_survey()
 	_check_roadside_spacing()
+	_check_drainage(town)
 	# Sample the entire expansion from junction to junction. A collider or
 	# a two-metre gap here can strand every contract beyond the broken road.
 	for road: Dictionary in Route.ROADS:
@@ -53,7 +54,7 @@ func _run() -> void:
 	town.free()
 	snow.free()
 	if failures.is_empty():
-		print("PASS: both 12.8 km county crossings, 35 physical approaches and plow bays, and 1,225 public-road routes")
+		print("PASS: drainage on both sides of all nine roads, both 12.8 km crossings, 35 approaches and plow bays, and 1,225 public-road routes")
 	else:
 		for failure in failures:
 			push_error(failure)
@@ -76,6 +77,48 @@ func _check_corridor(snow: Snow, town: Township, a: Vector2, b: Vector2, label: 
 			if absf(Roadside.height_at(sample.x,sample.y)) > .02:
 				expect(false, "A drainage ditch cuts the signed approach at " + label)
 				break
+
+func _check_drainage(town: Township) -> void:
+	var space := town.get_world_3d().direct_space_state
+	for road: Dictionary in Route.ROADS:
+		var start: Vector2 = road.a
+		var end: Vector2 = road.b
+		var heading := start.direction_to(end)
+		var half_width := Route.road_half_width(road.name)
+		for side: int in [-1, 1]:
+			var cross := heading.orthogonal() * side
+			var checked := 0
+			for station in range(9, roundi(start.distance_to(end)), 61):
+				var center := start + heading * station
+				var trough := center + cross * (half_width + 4.4)
+				if town._near_surface(trough - heading * 4.0, 3.8) or town._near_surface(trough + heading * 4.0, 3.8):
+					continue # This bank carries a crossing street or a farm entrance.
+				checked += 1
+				var grade := Roadside.height_at(trough.x, trough.y)
+				var hit := _ground_hit(space, trough)
+				if grade > -.22 or hit.is_empty() or absf(hit.position.y - grade) > .14:
+					expect(false, "Missing physical ditch along %s at %s" % [road.name, trough])
+					break
+				var pavement := _ground_hit(space, center + cross * (half_width - .6))
+				if pavement.is_empty() or absf(pavement.position.y) > .04:
+					expect(false, "Road edge leaves grade along %s at %s" % [road.name, center])
+					break
+			expect(checked > start.distance_to(end) / 80.0, "Both sides of " + road.name + " need continuous roadside drainage")
+	var drives := Route.SITES.values()
+	drives.append({"mouth": Vector2(0,Route.HOME_Z), "yard": Route.HOME_PARK, "name": "Home Place"})
+	for site: Dictionary in drives:
+		var mouth: Vector2 = site.mouth
+		var heading := mouth.direction_to(site.yard)
+		for offset: float in [-2.5, 0, 2.5]:
+			var p := mouth + heading * 8.5 + heading.orthogonal() * offset
+			var hit := _ground_hit(space, p)
+			expect(not hit.is_empty() and absf(hit.position.y) < .04, "A trench cuts the entrance to " + site.name)
+
+
+func _ground_hit(space: PhysicsDirectSpaceState3D, point: Vector2) -> Dictionary:
+	return space.intersect_ray(PhysicsRayQueryParameters3D.create(
+			Vector3(point.x, 3, point.y), Vector3(point.x, -3, point.y), 2))
+
 
 func _check_roadside_spacing() -> void:
 	# A quarter mile is a spacing measure. The weather controls what the cab can see.

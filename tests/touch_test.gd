@@ -77,6 +77,7 @@ func _run() -> void:
 		_expect(controls.visible and shift.mode=="drive","Tapping the ignition must open the working controls")
 		await _driving()
 		await _menus()
+		await _back_onto_road()
 		await _door()
 	shift.soundscape.shutdown()
 	shift.queue_free()
@@ -85,7 +86,7 @@ func _run() -> void:
 	OS.delay_msec(300)
 	await process_frame
 	if failures.is_empty():
-		print("PASS: touch target sizes, independent fingers, driving, walking, digging and menus")
+		print("PASS: touch target sizes, independent fingers, driving, walking, off-road recovery and menus")
 	else:
 		for failure in failures:
 			push_error(failure)
@@ -96,7 +97,6 @@ func _check_layout(screen: Vector2, safe: Rect2) -> void:
 	layout._safe = safe
 	layout._near_truck = true
 	layout._job_label = "TAKE TICKET"
-	layout._can_dig = true
 	var hud_scale := minf(screen.x / 960.0, screen.y / 540.0)
 	var origin := (screen - Vector2(960, 540) * hud_scale) * 0.5
 	var reserved := [Rect2(18, 4, 244, 78), Rect2(178, 210, 604, 190), Rect2(446, 510, 70, 28)]
@@ -174,11 +174,25 @@ func _book_key(code: Key) -> void:
 		key.pressed = down
 		_send(key)
 
+func _back_onto_road() -> void:
+	var truck: CharacterBody3D = shift.driver._truck
+	truck.position = Vector3(12, 0, -440)
+	truck.rotation = Vector3(0, -PI / 2, 0)
+	shift.driver.speed_mps = 0
+	await _advance()
+	_expect(shift.driver.offroad_fraction == 1.0, "The truck starts with all four tires in the snow")
+	_finger(3,_button(&"reverse"),true)
+	for tick in 540:
+		await physics_frame
+		if truck.position.x <= 1.5:
+			break
+	_finger(3,_button(&"reverse"),false)
+	_expect(shift.driver.in_cab and truck.position.x <= 1.5 and shift.driver.offroad_fraction == 0.0, "Holding the reverse pedal backs out of the ditch and regains the road")
+
 func _door() -> void:
 	await _tap(9,_button(&"interact"))
 	_expect(not shift.driver.in_cab and controls._buttons.has(&"interact") and not controls._buttons.has(&"blade"),"The open cab door should expose on-foot actions and hide the blade switch")
 	_expect(not controls._buttons.has(&"job"),"The job button stays hidden away from the assigned stop")
-	_expect(not controls._buttons.has(&"unstick"),"A free truck has no shovel control")
 	var start: Vector3 = shift.driver.get_driver_position()
 	var yaw: float = shift.driver._walk_yaw
 	var step: Rect2 = controls._buttons[&"accelerate"]
@@ -190,18 +204,6 @@ func _door() -> void:
 	_finger(1,walk_corner,false)
 	_finger(2,_button(&"steer_left"),false)
 	_expect(shift.driver.get_driver_position().distance_to(start) > 0.2 and absf(shift.driver._walk_yaw - yaw) > 0.1, "The outer corner of WALK must work while another finger turns")
-	shift.driver.stuck = true
-	shift.driver._walker.global_position = shift.driver._truck.to_global(Vector3(-1.5, 0, -1.4))
-	await _advance()
-	var dig := _button(&"unstick")
-	_finger(3,dig,true)
-	for i in ceili(shift.STROKE_SECONDS * shift.SHOVEL_STROKES * 60.0) + 12:
-		await physics_frame
-	await _advance()
-	_expect(not shift.driver.stuck and not controls._buttons.has(&"unstick"),"Holding SHOVEL at a buried wheel must free the truck and dismiss the button")
-	_expect(not Input.is_action_pressed("unstick"),"Finishing the dig must release the shovel action")
-	_finger(3,dig,false)
-	# Stage the normal outdoor interaction after exercising the walking and recovery controls.
 	var order: Dictionary = shift.dispatch.job
 	var stop: Vector2 = Route.SITES[order.site].stop
 	shift.driver._walker.global_position = Vector3(stop.x,0,stop.y)

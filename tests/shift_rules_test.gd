@@ -68,7 +68,7 @@ func _run() -> void:
 	check(shift.hud.subtitle == shift._onsite_instruction(), "Deb switches to field instructions on arrival")
 	await _test_shoulder_crossing()
 	await _test_fast_runoff()
-	print("Shift rules: outdoor handoffs, loading bay, cold, radio directions, ditch crossing and shovel recovery; failures: ",failures)
+	print("Shift rules: outdoor handoffs, loading bay, cold, radio directions, ditch crossing and powered recovery; failures: ",failures)
 	await _finish()
 
 
@@ -141,33 +141,17 @@ func _test_fast_runoff() -> void:
 	_key(KEY_D, true)
 	for tick in 240:
 		await physics_frame
-		if driver.stuck:
+		if driver.offroad_fraction == 1.0 and driver.speed_mps <= driver.FIELD_SPEED:
 			break
-	_key(KEY_W, false)
 	_key(KEY_D, false)
-	check(driver.stuck, "Taking a sharp turn at 50 sends the truck off Q into deep snow")
-	if not driver.stuck:
-		return
-	var buried_at: Vector3 = truck.global_position
-	await _tap(KEY_E)
-	await physics_frame
-	check(driver.can_dig_out() and shift.hud.prompt.contains("[F]"), "The driver can find the shovel action beside the wheel")
-	_key(KEY_F, true)
-	for tick in 70:
-		await physics_frame
-	_key(KEY_F, false)
-	await physics_frame
-	check(shift.cleared_scoops == 1 and driver.stuck, "Releasing the shovel preserves the first completed scoop")
-	_key(KEY_F, true)
-	for tick in 120:
-		await physics_frame
-	_key(KEY_F, false)
-	check(not driver.stuck and truck.global_position.is_equal_approx(buried_at), "Shoveling releases the wheels in place")
-	await _tap(KEY_E)
+	_key(KEY_W, false)
+	check(driver.offroad_fraction == 1.0 and driver.speed_mps > 0.0 and driver.speed_mps <= driver.FIELD_SPEED, "A fast turn off Q carries the truck into deep snow and slows it to a crawl")
+	shift.directions()
+	check(shift.hud.subtitle.contains("wheels straight") and shift.hud.subtitle.contains(Route.SITES[shift.dispatch.job.site].name), "Deb gives both a traction tip and the route from deep snow")
 	_key(KEY_S, true)
-	for tick in 300:
+	for tick in 600:
 		await physics_frame
-		if absf(truck.position.x) < 4.0:
+		if absf(truck.position.x) < 2.0:
 			break
 	_key(KEY_S, false)
-	check(driver.in_cab and absf(truck.position.x) < 4.0, "The driver can back the freed truck onto County Q")
+	check(driver.in_cab and absf(truck.position.x) < 2.0 and driver.offroad_fraction == 0.0, "The driver can back onto County Q and regain road traction from inside the cab")

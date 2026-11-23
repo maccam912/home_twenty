@@ -16,7 +16,6 @@ const ONE_SHOT_LEVELS := {
 	"blade_drop": -6.0,
 	"ignition": -4.0,
 	"plat_fold": -1.0,
-	"shovel": -5.0,
 	"tow_chain": -11.0,
 	"mailbox": -10.0,
 }

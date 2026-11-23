@@ -218,6 +218,10 @@ func _flag(t: Transform3D) -> void:
 
 
 func _apple_tree(t: Transform3D) -> void:
+	# The farthest branch tip is just under two metres from the root.
+	if town._near_surface(Vector2(t.origin.x, t.origin.z), 2.4):
+		return
+	t.origin.y = Roadside.height_at(t.origin.x, t.origin.z)
 	town._block("Apple trunk",t*Vector3(.07,.67,.04),Vector3(.27,1.34,.27))
 	_timber(t, Vector3.ZERO,Vector3(.14,1.29,.08),.29,"creosote")
 	for arm in 3:
@@ -340,19 +344,22 @@ func _open_road(road: Dictionary) -> void:
 	# On the outlying roads even a lull can show nothing but the next snow pole.
 	# Long irregular gaps separate fence remnants and the occasional clump of trees.
 	while distance < a.distance_to(b)-18:
-		var edge := a + along*distance + across*(5.1 if i%2 else -5.1)
+		var center := a + along * distance
+		var side := 1 if i % 2 else -1
+		var edge := center + across * side * 5.1
 		distance += town.rng.randf_range(68,156)
 		i += 1
-		if road.name == "County Q" and edge.y > -2200 and edge.y < 200:
+		if road.name == "County Q" and edge.y > Roadside.CORE_NORTH and edge.y < Roadside.CORE_SOUTH:
 			continue
 		if not town._near_surface(edge,.5):
 			town._snow_stake(Vector3(edge.x,0,edge.y))
 		# Low remnants of the last grader pass give the white road an edge
 		# without putting a building or landmark in the empty stretches.
-		var ridge_center := edge + across * (2.35 if (edge-a).dot(across) > 0 else -2.35)
+		var ridge_center := center + across * side * (Route.road_half_width(road.name) + 1.55)
 		var length: float = town.rng.randf_range(18,36)
-		if not town._near_surface(ridge_center-along*length*.5,1.5) and not town._near_surface(ridge_center+along*length*.5,1.5) and not town._near_surface(ridge_center,1.5):
-			town._drift(Vector3(ridge_center.x,-.045,ridge_center.y),Vector3(2.08,town.rng.randf_range(.25,.52),length),atan2(along.x,along.y))
+		var half_span := along.abs() * (length * .5) + across.abs() * .9
+		if not town._intersects_surface(Rect2(ridge_center - half_span, half_span * 2)):
+			town._drift(Vector3(ridge_center.x,-.045,ridge_center.y),Vector3(1.42,town.rng.randf_range(.25,.52),length),atan2(along.x,along.y))
 		if i % 11 != 0:
 			continue
 		var offset: float = town.rng.randf_range(39,90) * (-1 if i%2 else 1)
@@ -373,8 +380,10 @@ func _open_road(road: Dictionary) -> void:
 			var away := (end-(a+b)*.5).normalized()
 			var edge := end + away*9
 			var t := Transform3D(Basis.looking_at(Vector3(away.x,0,away.y)),Vector3(edge.x,0,edge.y))
+			var berm := t * Vector3(0,0,-3.4)
+			t.origin.y = Roadside.height_at(edge.x, edge.y)
 			for x: float in [-1.42,1.42]:
 				_box(t,Vector3(x,.62,0),Vector3(.16,1.24,.24),"wood")
 			_box(t,Vector3.UP*1.03,Vector3(3.35,.41,.15),"orange")
 			town._letter("PLOW LIMIT",t*Vector3(0,1.03,.085),t.basis.get_euler().y,.0067)
-			town._drift(t * Vector3(0,0,-3.4),Vector3(5.4,1.15,14),t.basis.get_euler().y+PI*.5)
+			town._drift(berm,Vector3(5.4,1.15,14),t.basis.get_euler().y+PI*.5)

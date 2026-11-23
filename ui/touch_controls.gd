@@ -23,7 +23,6 @@ var _in_cab := true
 var _blade_down := false
 var _near_truck := false
 var _job_label := ""
-var _can_dig := false
 var _unit := 1.0
 var _safe := Rect2()
 var _font: Font
@@ -55,15 +54,13 @@ func _sync() -> void:
 	var driver_position: Vector3 = shift.driver.get_driver_position()
 	var near: bool = not cab and driver_position.distance_to(shift.driver.get_truck_position()) <= 4.2
 	var action_text: String = "" if cab else shift.field_action_label().to_upper()
-	var dig: bool = not cab and shift.driver.can_dig_out()
 	var safe := _safe_rect()
-	if safe != _safe or cab != _in_cab or blade != _blade_down or near != _near_truck or action_text != _job_label or dig != _can_dig or _buttons.is_empty():
+	if safe != _safe or cab != _in_cab or blade != _blade_down or near != _near_truck or action_text != _job_label or _buttons.is_empty():
 		_safe = safe
 		_in_cab = cab
 		_blade_down = blade
 		_near_truck = near
 		_job_label = action_text
-		_can_dig = dig
 		_layout()
 		for id in _held.keys():
 			if _held[id] != &"" and not _buttons.has(_held[id]):
@@ -105,13 +102,8 @@ func _layout() -> void:
 	else:
 		if _near_truck:
 			_place(&"interact", Rect2(256, row_y, 112, 78))
-		if _can_dig:
-			_place(&"unstick", Rect2(span.x - 374, row_y, 112, 78))
 		if not _job_label.is_empty():
-			var work := Rect2(span.x - 374, row_y, 112, 78)
-			if _can_dig:
-				work = Rect2(span.x - 318, 14, 112, 69)
-			_place(&"job", work)
+			_place(&"job", Rect2(span.x - 374, row_y, 112, 78))
 	_place(&"plat", Rect2(span.x - 198, 14, 94, 69))
 	_place(&"pause_shift", Rect2(span.x - 96, 14, 84, 69))
 
@@ -232,7 +224,7 @@ func _draw() -> void:
 		_key_face(&"camera_view")
 		_key_face(&"horn")
 	else:
-		for action in [&"interact", &"unstick", &"job"]:
+		for action in [&"interact", &"job"]:
 			if _buttons.has(action):
 				_key_face(action)
 	_map_tab(_local_button(&"plat"))
@@ -374,11 +366,6 @@ func _push_key(r: Rect2, action: StringName, down: bool) -> void:
 			wording = _job_label
 			draw_rect(Rect2(p - Vector2(4,6),Vector2(8,12)),ink,false,1.4)
 			draw_circle(p + Vector2(2,1),0.9,ink)
-		&"unstick":
-			wording = "SHOVEL"
-			draw_line(p + Vector2(-3,3),p + Vector2(5,-5),ink,2,true)
-			draw_polyline(PackedVector2Array([p + Vector2(4,-6),p + Vector2(6,-8),p + Vector2(9,-5),p + Vector2(7,-3),p + Vector2(4,-6)]),ink,1.5,true)
-			draw_colored_polygon(PackedVector2Array([p + Vector2(-7,0),p + Vector2(0,7),p + Vector2(-7,10),p + Vector2(-10,7)]),ink)
 	var point := 18
 	while point > 11 and _font.get_string_size(wording, HORIZONTAL_ALIGNMENT_LEFT, -1, point).x > r.size.x - 6:
 		point -= 1

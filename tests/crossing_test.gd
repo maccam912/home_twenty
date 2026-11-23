@@ -27,7 +27,7 @@ func _run() -> void:
 		elapsed += 1
 		if elapsed % hz == 0:
 			peak_tiles = maxi(peak_tiles, shift.snow.visible_tiles.size())
-			if shift.driver.stuck or (elapsed > 5 * hz and shift.driver.speed_mps < 0.1):
+			if elapsed > 5 * hz and shift.driver.speed_mps < 0.1:
 				break
 	_key(KEY_W, false)
 	var seconds := float(elapsed) / hz

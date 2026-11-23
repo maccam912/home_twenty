@@ -14,9 +14,6 @@ var _knuckles: Array[Node3D] = []
 var _plow: Node3D
 var _wheel: Node3D
 var _cargo: Node3D
-var _shovel: Node3D
-var _shovel_rest: Transform3D
-var _shovel_load: MeshInstance3D
 var _needle: Node3D
 var _beacon_rotor: Node3D
 var _scatter := ShaderMaterial.new()
@@ -323,23 +320,9 @@ func _bed() -> void:
 	var toolbox := _box(self, Vector3(-0.40, 1.14, 0.94), Vector3(0.73, 0.22, 0.29), "steel")
 	_box(toolbox, Vector3(0, 0.113, 0), Vector3(0.76, 0.038, 0.318), "rim")
 	_box(toolbox, Vector3(0, 0.03, 0.148), Vector3(0.12, 0.049, 0.022), "black")
-	_shovel = _joint(self, Vector3(0.60, 1.16, 0.81))
-	_shovel.rotation = Vector3(-0.06, PI + 0.04, 0)
-	_shovel_rest = _shovel.transform
-	_bar(_shovel, Vector3.ZERO, Vector3(0, 0, -1.51), 0.041, 0.041, "sack")
-	_box(_shovel, Vector3(0, 0, -1.56), Vector3(0.28, 0.025, 0.35), "steel")
-	for side in [-1.0, 1.0]:
-		_box(_shovel, Vector3(side * 0.132, 0.027, -1.54), Vector3(0.019, 0.065, 0.29), "steel").rotation.z = -side * 0.26
-	_box(_shovel, Vector3(0, 0.003, -1.72), Vector3(0.28, 0.02, 0.035), "cut")
-	_paint("snow", Color("#ccd3d4"))
-	var scoop := SphereMesh.new()
-	scoop.radial_segments = 8
-	scoop.rings = 3
-	_shovel_load = _piece(_shovel, scoop, Vector3(0, 0.035, -1.56), "snow")
-	_shovel_load.hide()
 
 
-# Stow handheld items within reach and heavier loads behind the ballast, clear of the shovel.
+# Stow handheld items within reach and heavier loads behind the ballast.
 func set_cargo(item: String) -> void:
 	if is_instance_valid(_cargo):
 		_cargo.free()
@@ -421,26 +404,6 @@ func _cargo_label(words: String, at: Vector3, height: float) -> void:
 	label.modulate = Color("#312e24")
 	label.position = at
 	_cargo.add_child(label)
-
-
-func set_shovel_stroke(camera: Camera3D, phase: float) -> void:
-	if phase < 0:
-		if _shovel.get_parent() != self:
-			_shovel.reparent(self, false)
-			_shovel.transform = _shovel_rest
-			_shovel_load.hide()
-		return
-	if _shovel.get_parent() != camera:
-		_shovel.reparent(camera, false)
-	var scoop := sin(PI * clampf(phase, 0.0, 1.0))
-	var toss := sin(PI * smoothstep(0.45, 1.0, phase))
-	# Keep the handle on the open side of the driver at either cab door.
-	var outside := -1.0 if camera.to_local(global_position).x >= 0.0 else 1.0
-	_shovel.position = Vector3(outside * 0.40, -0.32 - 0.18 * scoop, 0.06 - 0.18 * scoop)
-	_shovel.rotation = Vector3(-0.07 - 0.34 * scoop + 0.48 * toss, outside * (0.21 - 0.41 * toss), outside * 0.8 * toss)
-	var load_fraction := smoothstep(0.26, 0.47, phase) * (1.0 - smoothstep(0.65, 0.83, phase))
-	_shovel_load.visible = load_fraction > 0.01
-	_shovel_load.scale = Vector3(0.25, 0.095, 0.28) * maxf(load_fraction, 0.01)
 
 
 func _front_end() -> void:

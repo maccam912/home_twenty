@@ -10,8 +10,6 @@ const Dispatch = preload("res://game/dispatch.gd")
 const Route = preload("res://world/route.gd")
 const STOP_REACH := 3.7
 const PICTURE_LINES := 320.0
-const SHOVEL_STROKES := 3
-const STROKE_SECONDS := 0.95
 var town: Township
 var driver
 var snow
@@ -36,8 +34,6 @@ var last_revision := -1
 var mic_down := false
 var last_cut := 0.0
 var previous_mouse_mode := Input.MOUSE_MODE_VISIBLE
-var cleared_scoops := 0
-var stroke_time := 0.0
 
 func _ready() -> void:
 	get_tree().auto_accept_quit = false
@@ -64,7 +60,6 @@ func _ready() -> void:
 	driver.cab_changed.connect(_on_cab_changed)
 	driver.blade_changed.connect(func(): soundscape.play_cue("blade_drop" if driver.blade_down else "blade_lift"))
 	driver.collapse_recovered.connect(_on_collapse)
-	driver.bogged_down.connect(_on_bogged_down)
 	var hud_layer := CanvasLayer.new()
 	add_child(hud_layer)
 	hud = ShiftHUD.new()
@@ -178,29 +173,6 @@ func _on_cab_changed() -> void:
 func _on_collapse() -> void:
 	say("IN THE CAB","The door is shut. The heater is running. You remember the wind, then nothing.",8)
 
-func _on_bogged_down() -> void:
-	cleared_scoops = 0
-	town.pack_wheel_snow(driver.get_truck_position(), driver.get_forward())
-	say("IN THE CAB", "The wheels have packed the snow solid. There’s a shovel in the bed.", 5)
-
-func _shovel_wheels(delta: float) -> void:
-	if not driver.can_dig_out() or not Input.is_action_pressed("unstick"):
-		stroke_time = 0.0
-		driver.set_shovel_stroke(-1.0)
-		return
-	if stroke_time == 0.0:
-		soundscape.play_cue("shovel")
-	stroke_time += delta
-	driver.set_shovel_stroke(stroke_time / STROKE_SECONDS)
-	if stroke_time >= STROKE_SECONDS:
-		stroke_time = 0.0
-		cleared_scoops += 1
-		town.clear_wheel_snow(1.0 - float(cleared_scoops) / SHOVEL_STROKES)
-		if cleared_scoops == SHOVEL_STROKES:
-			driver.dig_out()
-			driver.set_shovel_stroke(-1.0)
-			say("AT THE WHEELS", "That’s room to get rolling. Ease it back onto the road.", 4)
-
 func say(who: String, what: String, seconds: float) -> void:
 	hud.speaker = who
 	hud.subtitle = what
@@ -212,15 +184,14 @@ func directions() -> void:
 	var v: Vector3 = driver.get_truck_position()
 	var p := Vector2(v.x, v.z)
 	var order := dispatch.job
-	if driver.stuck:
-		say("DEB   /   CB 19", "You buried her, hon? Grab the shovel and clear the packed snow by the tires. Take it easy coming back up.", 8)
-		return
 	var site: Dictionary = Route.SITES[order.site]
 	var words := Route.directions(p, order.site)
 	if p.distance_to(site.yard) < 22:
 		words = _onsite_instruction()
 	elif order.kind == "plow" and p.distance_to(site.mouth) < 16:
 		words = "That's the turn for %s. Lower the blade and open a truck-width from the road to the yard." % site.name
+	elif driver.offroad_fraction >= 0.75:
+		words = "Easy in that snow, hon. She’ll pull better with the wheels straight. " + words
 	say("DEB   /   CB 19", words, maxf(7.0, words.length() / 17.0))
 
 func _onsite_instruction() -> String:
@@ -316,8 +287,7 @@ func _physics_process(delta: float) -> void:
 		return
 	var truck_at: Vector3 = driver.get_truck_position()
 	snow.stream_to(Vector2(truck_at.x, truck_at.z))
-	driver.set_snowbank_contact(not snow.on_surface(Vector2(truck_at.x, truck_at.z)))
-	_shovel_wheels(delta)
+	driver.sample_tires(snow)
 	var blade_tip: Vector3 = driver.get_blade_position()
 	var forward: Vector3 = driver.get_forward()
 	var ahead := blade_tip + forward*.5
@@ -357,15 +327,7 @@ func _physics_process(delta: float) -> void:
 	hud.blade = driver.blade_down
 	hud.prompt = ""
 	var field_action := field_action_label()
-	if driver.stuck and driver.in_cab:
-		hud.prompt = "Wheels buried · Exit cab to shovel" if touch_enabled else "Wheels buried · [E] Get out to shovel"
-	elif driver.can_dig_out():
-		hud.prompt = "Hold SHOVEL to dig out the wheels" if touch_enabled else "Hold [F] to dig out the wheels"
-		if stroke_time > 0 or cleared_scoops > 0:
-			hud.prompt += "  ·  %d/%d" % [cleared_scoops, SHOVEL_STROKES]
-	elif driver.stuck:
-		hud.prompt = "Walk up beside a buried wheel"
-	elif not field_action.is_empty():
+	if not field_action.is_empty():
 		hud.prompt = "[X]  " + field_action
 	elif not driver.in_cab and player.distance_to(driver.get_truck_position())<4:
 		hud.prompt = "[E]  Climb into the cab"

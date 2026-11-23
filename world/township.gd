@@ -2,8 +2,8 @@ extends Node3D
 
 const Route = preload("res://world/route.gd")
 const Roadside = preload("res://world/roadside.gd")
+const FieldRelief = preload("res://world/field_relief.gd")
 const Backroads = preload("res://world/backroads.gd")
-const TruckMesh = preload("res://vehicle/truck_mesh.gd")
 const BECK_TANK = preload("res://world/props/beck_tank.tscn")
 const BECK_MAILBOX = preload("res://world/props/beck_mailbox.tscn")
 const DRIFT_TILE := 96.0
@@ -18,8 +18,9 @@ var drum := CylinderMesh.new()
 var mound := SphereMesh.new()
 var gable: ArrayMesh
 var drift_forms: Array[ArrayMesh] = []
-var wheel_drifts: Array[MeshInstance3D] = []
 var tree_meshes: Dictionary[StringName, Mesh] = {}
+var trunk_cells: Dictionary[Vector2i, StaticBody3D] = {}
+var trunk_shape := BoxShape3D.new()
 var mats := {}
 var batches := {}
 var snowfall: CPUParticles3D
@@ -27,6 +28,8 @@ var weather_camera: Camera3D
 var gust_strength := 0.0
 var storm_seconds := 0.0
 var ground_snow: Node3D
+var ribbon_arrays: Array
+var drift_center := Vector2i.MAX
 var storm_env: Environment
 var flake_material := ShaderMaterial.new()
 var drift_material := ShaderMaterial.new()
@@ -195,18 +198,39 @@ func _ground_snow() -> void:
 			ribbons.set_normal(surface_normal)
 			ribbons.add_vertex(Vector3(point.x,.24+uvs.y*h,point.y))
 	drift_material.shader = preload("res://world/spindrift.gdshader")
-	var sheet := ribbons.commit()
+	ribbon_arrays = ribbons.commit_to_arrays()
 	ground_snow = Node3D.new()
 	ground_snow.name = "RunningGroundSnow"
 	add_child(ground_snow)
-	for x in range(-1,2):
-		for z in range(-1,2):
-			var tile := MeshInstance3D.new()
+	for i in 9:
+		var tile := MeshInstance3D.new()
+		tile.material_override = drift_material
+		tile.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		ground_snow.add_child(tile)
+	_follow_ground_snow(Route.HOME_PARK)
+
+func _follow_ground_snow(eye: Vector2) -> void:
+	var center := Vector2i((eye / DRIFT_TILE).round())
+	if drift_center == center:
+		return
+	drift_center = center
+	for x in range(center.x - 1, center.x + 2):
+		for z in range(center.y - 1, center.y + 2):
+			var origin := Vector3(x * DRIFT_TILE, 0, z * DRIFT_TILE)
+			var tile := ground_snow.get_child(posmod(x, 3) * 3 + posmod(z, 3)) as MeshInstance3D
+			if tile.mesh and tile.position == origin:
+				continue
+			# Refit only tiles entering view, keeping each ribbon just above its field.
+			var arrays := ribbon_arrays.duplicate()
+			var vertices: PackedVector3Array = ribbon_arrays[Mesh.ARRAY_VERTEX].duplicate()
+			for i in vertices.size():
+				var p := vertices[i] + origin
+				vertices[i].y += Roadside.height_at(p.x, p.z)
+			arrays[Mesh.ARRAY_VERTEX] = vertices
+			var sheet := ArrayMesh.new()
+			sheet.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
 			tile.mesh = sheet
-			tile.position = Vector3(x * DRIFT_TILE, 0, z * DRIFT_TILE)
-			tile.material_override = drift_material
-			tile.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-			ground_snow.add_child(tile)
+			tile.position = origin
 
 func set_truck_pose(at: Vector3, forward: Vector3, up := Vector3.UP) -> void:
 	var right := forward.cross(up)
@@ -233,7 +257,7 @@ func _process(delta: float) -> void:
 	var camera := get_viewport().get_camera_3d()
 	if camera:
 		var eye := camera.global_position
-		ground_snow.position = Vector3(snappedf(eye.x,DRIFT_TILE), 0, snappedf(eye.z,DRIFT_TILE))
+		_follow_ground_snow(Vector2(eye.x, eye.z))
 		snowfall.global_position = camera.global_position + Vector3(-10, 4.2, -2.6) - camera.global_basis.z*6.
 		if weather_camera != camera:
 			snowfall.restart()
@@ -245,14 +269,14 @@ func _snowfield() -> void:
 	add_child(ground)
 	var fence := Route.COUNTY_BOUNDS.grow(70.0)
 	for x: float in [fence.position.x, fence.end.x]:
-		_block("Township edge", Vector3(x, 2, fence.get_center().y), Vector3(2, 6, fence.size.y + 2))
+		_block("Township edge", Vector3(x, 8, fence.get_center().y), Vector3(2, 62, fence.size.y + 2))
 	for z: float in [fence.position.y, fence.end.y]:
-		_block("Township edge", Vector3(fence.get_center().x, 2, z), Vector3(fence.size.x + 2, 6, 2))
+		_block("Township edge", Vector3(fence.get_center().x, 8, z), Vector3(fence.size.x + 2, 62, 2))
 
-	# Shallow sheets across the flats catch the ambient light. The horizon stays level.
+	# Wind packs shallow sheets against the slopes of the fields.
 	for i in range(175):
 		var x := rng.randf_range(42,590) * (-1 if i%2 else 1)
-		var z := rng.randf_range(Roadside.DITCH_NORTH-100,Roadside.DITCH_SOUTH+100)
+		var z := rng.randf_range(Roadside.CORE_NORTH-100,Roadside.CORE_SOUTH+100)
 		if _near_surface(Vector2(x, z), 32):
 			continue
 		_drift(Vector3(x,-.07,z),Vector3(rng.randf_range(8,23),rng.randf_range(.18,.65),rng.randf_range(22,60)),rng.randf_range(1.06,1.39))
@@ -267,33 +291,20 @@ func _near_surface(point: Vector2, margin: float) -> bool:
 					return true
 	return false
 
+func _intersects_surface(footprint: Rect2) -> bool:
+	for surface in road_bounds:
+		if surface.intersects(footprint):
+			return true
+	return false
+
+
 func _drift(at: Vector3, dims: Vector3, yaw: float) -> void:
-	_shape(drift_forms[rng.randi_range(0,drift_forms.size()-1)],at,dims,"snow",Vector3(0,yaw,0))
-
-func pack_wheel_snow(at: Vector3, forward: Vector3) -> void:
-	var right := forward.cross(Vector3.UP).normalized()
-	var index := 0
-	for axle: float in [TruckMesh.FRONT_AXLE_Z, TruckMesh.REAR_AXLE_Z]:
-		for side: float in [-1, 1]:
-			if wheel_drifts.size() <= index:
-				var mound_patch := MeshInstance3D.new()
-				mound_patch.mesh = drift_forms[index]
-				mound_patch.material_override = mats.snow
-				add_child(mound_patch)
-				wheel_drifts.append(mound_patch)
-			var patch := wheel_drifts[index]
-			var center := at - forward * axle + right * side * TruckMesh.HALF_TRACK
-			center.y = Roadside.height_at(center.x, center.z) - 0.08
-			patch.global_position = center
-			patch.rotation.y = atan2(-forward.x, -forward.z) + side * 0.25
-			patch.scale = Vector3(1.55, 0.73, 2.15)
-			patch.show()
-			index += 1
-
-func clear_wheel_snow(remaining: float) -> void:
-	for patch in wheel_drifts:
-		patch.visible = remaining > 0.0
-		patch.scale.y = 0.73 * maxf(remaining, 0.01)
+	at.y += Roadside.height_at(at.x, at.z)
+	var rise_x := FieldRelief.height_at(at.x + 1, at.z) - FieldRelief.height_at(at.x - 1, at.z)
+	var rise_z := FieldRelief.height_at(at.x, at.z + 1) - FieldRelief.height_at(at.x, at.z - 1)
+	var slope := Basis(Quaternion(Vector3.UP, Vector3(-rise_x, 2, -rise_z).normalized()))
+	var axes := slope * Basis(Vector3.UP, yaw) * Basis.from_scale(dims)
+	_shape_at(drift_forms[rng.randi_range(0,drift_forms.size()-1)], Transform3D(axes, at), "snow")
 
 func _buildings() -> void:
 	_house(Route.HOME_HOUSE, PI / 2.0, "cream_siding", true)
@@ -439,8 +450,8 @@ func _road_furniture() -> void:
 	# Thirty-five 46 m spans separate the two farm services along the section line.
 	var previous := Vector3.ZERO
 	var first_z := Route.HOME_Z + 13.0
-	var first_span := floori((first_z-Roadside.DITCH_SOUTH)/46.0)
-	var last_span := ceili((first_z-Roadside.DITCH_NORTH)/46.0)
+	var first_span := floori((first_z-Roadside.CORE_SOUTH)/46.0)
+	var last_span := ceili((first_z-Roadside.CORE_NORTH)/46.0)
 	for span in range(first_span,last_span+1):
 		var p := Vector3(-8.8 - sin(span*.57)*.24,0,first_z-span*46.0)
 		p.y = Roadside.height_at(p.x, p.z)
@@ -546,6 +557,7 @@ func _outer_roads() -> void:
 	var previous := Vector3.ZERO
 	for i in range(11):
 		var pole := Vector3(24+i*59,0,-1770)
+		pole.y = Roadside.height_at(pole.x, pole.z)
 		_beam(pole,pole+Vector3(.13,7.7,.09),.23,"pole")
 		_box(pole+Vector3(.13,7.24,.09),Vector3(.17,.18,1.85),"wood")
 		for side: float in [-.68,.68]:
@@ -570,17 +582,13 @@ func _outer_roads() -> void:
 		var dir := a.direction_to(b)
 		for i in range(28, int(a.distance_to(b)) - 25, 23):
 			var side := 1 if i % 2 else -1
-			var at := a + dir * (i + rng.randf_range(-3,3)) + dir.orthogonal() * side * rng.randf_range(6.4,7.7)
+			var center := a + dir * (i + rng.randf_range(-3,3))
+			var at := center + dir.orthogonal() * side * (Route.road_half_width(road.name) + rng.randf_range(1.3,1.8))
 			var length := rng.randf_range(13,24)
-			var half_span := dir.abs() * (length*.5) + dir.orthogonal().abs()*1.15
+			var half_span := dir.abs() * (length*.5) + dir.orthogonal().abs()*.72
 			var footprint := Rect2(at-half_span, half_span*2).grow(.7)
-			var blocked := false
-			for surface in road_bounds:
-				if surface.intersects(footprint):
-					blocked = true
-					break
-			if not blocked:
-				_drift(Vector3(at.x,-.035,at.y),Vector3(2.2,rng.randf_range(.34,.76),length),atan2(dir.x,dir.y))
+			if not _intersects_surface(footprint):
+				_drift(Vector3(at.x,-.035,at.y),Vector3(1.4,rng.randf_range(.29,.58),length),atan2(dir.x,dir.y))
 	# Line follows the woodlot edges. Short gaps leave the section corners and
 	# farm entrances visible from the cab.
 	for stand: Vector2 in [Vector2(625,-1760), Vector2(665,-1625), Vector2(611,-1398),
@@ -600,6 +608,7 @@ func _outer_roads() -> void:
 		_bare_tree(at,rng.randf_range(8,11),true)
 
 func _bend_marker(at: Vector3, yaw: float, arrow: int) -> void:
+	at.y = Roadside.height_at(at.x, at.z)
 	var t := Transform3D(Basis(Vector3.UP,yaw),at)
 	_local(t,Vector3(0,.93,0),Vector3(.12,1.86,.14),"creosote")
 	_local(t,Vector3(0,1.75,0),Vector3(1.60,.62,.10),"school_bus")
@@ -891,6 +900,7 @@ func _fence(start: Vector3, finish: Vector3, spacing: float) -> void:
 	var previous := Vector3.ZERO
 	for i in range(count+1):
 		var p := start.lerp(finish,float(i)/count)
+		p.y = Roadside.height_at(p.x, p.z)
 		var top := p + Vector3(rng.randf_range(-0.07,0.07),rng.randf_range(1.12,1.33),0.035)
 		_beam(p, top, 0.145, "wood")
 		if i:
@@ -907,7 +917,7 @@ func _wire(a: Vector3, b: Vector3, sag: float, thickness := 0.045) -> void:
 		last = point
 
 func _tree_lines() -> void:
-	for pos: Vector3 in [Vector3(-82,0,Route.HOME_Z+13), Vector3(-104,0,Route.HOME_Z+20),
+	for pos: Vector3 in [Vector3(-82,0,Route.HOME_Z+16), Vector3(-104,0,Route.HOME_Z+20),
 		Vector3(-117,0,Route.HOME_Z+9), Vector3(140,0,Route.BECK_Z+30),
 		Vector3(153,0,Route.BECK_Z+24), Vector3(161,0,Route.BECK_Z+38)]:
 		_pine(pos,rng.randf_range(8.2,13.1))
@@ -917,7 +927,7 @@ func _tree_lines() -> void:
 		_bare_tree(pos,rng.randf_range(6.8,10.3),true)
 
 	# Discrete windbreaks mark distant property lines, leaving the central fields open.
-	for stand: Vector2 in [Vector2(301,92),Vector2(-314,-362),Vector2(408,-718),
+	for stand: Vector2 in [Vector2(301,92),Vector2(-314,-362),Vector2(403,-697),
 		Vector2(-264,-1142),Vector2(358,-1440),Vector2(-316,-1669)]:
 		for i in range(13):
 			var x := stand.x + rng.randf_range(-14,14)
@@ -926,10 +936,11 @@ func _tree_lines() -> void:
 				_bare_tree(Vector3(x,0,z),rng.randf_range(7,13),false)
 			else:
 				_pine(Vector3(x,0,z),rng.randf_range(7,15),true)
+	preload("res://world/trees/woodlots.gd").new().plant(self)
 	# Isolated stalks and broken fencelines surface where the fields meet the ditch.
 	for i in range(140):
 		var x := rng.randf_range(8.5,48.0) * (-1 if i%2 else 1)
-		var z := rng.randf_range(Roadside.DITCH_NORTH,Roadside.DITCH_SOUTH)
+		var z := rng.randf_range(Roadside.CORE_NORTH,Roadside.CORE_SOUTH)
 		if _near_surface(Vector2(x, z), 2.5):
 			continue
 		for j in range(rng.randi_range(3,8)):
@@ -948,21 +959,26 @@ func _ditch_grass() -> void:
 	straw.roughness = 1.0
 	mats["sedge"] = straw
 	var clumps := [_sedge_clump(), _sedge_clump(), _sedge_clump()]
-	for side: int in [-1, 1]:
-		var z := Roadside.DITCH_NORTH + rng.randf_range(4, 22)
-		while z < Roadside.DITCH_SOUTH:
-			var patch_length := rng.randf_range(4, 19)
-			var distance := rng.randf_range(8.2, 11.8)
-			for i in range(ceili(patch_length * .93)):
-				var along := z + rng.randf_range(0, patch_length)
-				var x := side * (distance + rng.randf_range(-.8, .8))
-				var grade := Roadside.height_at(x, along)
-				if grade > -.22:
-					continue
-				var tussock := Vector3(x, grade - .03, along)
-				var height := rng.randf_range(.68, 1.24)
-				_shape(clumps[rng.randi_range(0, 2)], tussock, Vector3(1,height,1), "sedge", Vector3(0,rng.randf_range(-.65,.65),0))
-			z += patch_length + rng.randf_range(9, 57)
+	for road: Dictionary in Route.ROADS:
+		var start: Vector2 = road.a
+		var end: Vector2 = road.b
+		var along := start.direction_to(end)
+		var width := Route.road_half_width(road.name)
+		for side: int in [-1, 1]:
+			var across := along.orthogonal() * side
+			var station := rng.randf_range(3, 40)
+			while station < start.distance_to(end):
+				var length := rng.randf_range(4, 15)
+				var offset := width + rng.randf_range(4.0, 7.2)
+				for i in ceili(length * .75):
+					var p := start + along * (station + rng.randf_range(0, length)) + across * (offset + rng.randf_range(-.8, .8))
+					var grade := Roadside.height_at(p.x, p.y)
+					if grade > -.22:
+						continue
+					var tussock := Vector3(p.x, grade - .03, p.y)
+					var height := rng.randf_range(.68, 1.24)
+					_shape(clumps[rng.randi_range(0, 2)], tussock, Vector3(1,height,1), "sedge", Vector3(0,rng.randf_range(-.65,.65),0))
+				station += length + rng.randf_range(17, 99)
 
 
 func _sedge_clump() -> ArrayMesh:
@@ -989,6 +1005,7 @@ func _sedge_clump() -> ArrayMesh:
 
 
 func _load_woodlot() -> void:
+	trunk_shape.size = Vector3(.35, 4, .35)
 	# The Blender layout holds each sculpt at its own workbench position.
 	# Instance the local meshes so tree origins follow the playable township.
 	var library := preload("res://world/trees/winter_stand.glb").instantiate()
@@ -1003,19 +1020,45 @@ func _pine(at: Vector3, height: float, distant: bool = false) -> void:
 	var width := height * rng.randf_range(0.81,1.06)
 	var rot := Vector3(0,rng.randf()*TAU,0)
 	var scale_to_height := Vector3(width,height,width)*0.1
-	_shape(tree_meshes["Spruce%dBoughs%s" % [variant,suffix]],at,scale_to_height,"spruce_needles",rot)
-	_shape(tree_meshes["Spruce%dWood%s" % [variant,suffix]],at,scale_to_height,"tree_bark",rot)
-	if not distant:
-		_block("Spruce trunk",at+Vector3.UP*2.0,Vector3(height*0.039,4.0,height*0.039))
+	at.y = Roadside.height_at(at.x, at.z)
+	var placement := Transform3D(Basis.from_euler(rot).scaled_local(scale_to_height), at)
+	var boughs := tree_meshes["Spruce%dBoughs%s" % [variant,suffix]]
+	if not _crown_fits(placement * boughs.get_aabb()):
+		return
+	_shape_at(boughs, placement, "spruce_needles")
+	_shape_at(tree_meshes["Spruce%dWood%s" % [variant,suffix]], placement, "tree_bark")
+	_tree_trunk(at)
 
 func _bare_tree(at: Vector3, height: float, near: bool) -> void:
 	var variant := rng.randi_range(0,2)
 	var suffix := "" if near else "Far"
 	var scale_to_height := Vector3.ONE*height*0.1
 	var rot := Vector3(0,rng.randf()*TAU,0)
-	_shape(tree_meshes["Birch%dWood%s" % [variant,suffix]],at,scale_to_height,"tree_bark",rot)
-	if near:
-		_block("Birch trunk",at+Vector3.UP*2.0,Vector3(height*0.029,4.0,height*0.029))
+	at.y = Roadside.height_at(at.x, at.z)
+	var placement := Transform3D(Basis.from_euler(rot).scaled_local(scale_to_height), at)
+	var mesh := tree_meshes["Birch%dWood%s" % [variant,suffix]]
+	if not _crown_fits(placement * mesh.get_aabb()):
+		return
+	_shape_at(mesh, placement, "tree_bark")
+	_tree_trunk(at)
+
+func _crown_fits(bounds: AABB) -> bool:
+	var center := bounds.get_center()
+	# Include wind displacement of the tallest crowns at full gust.
+	return not _near_surface(Vector2(center.x, center.z), maxf(bounds.size.x, bounds.size.z) * .5 + .6)
+
+func _tree_trunk(at: Vector3) -> void:
+	# Share a collision body per field cell, even for trees using the distant mesh.
+	var cell := Vector2i(floori(at.x / SCENERY_CELL), floori(at.z / SCENERY_CELL))
+	if not trunk_cells.has(cell):
+		var body := StaticBody3D.new()
+		body.position = Vector3(cell.x * SCENERY_CELL, 0, cell.y * SCENERY_CELL)
+		add_child(body)
+		trunk_cells[cell] = body
+	var trunks := trunk_cells[cell]
+	var owner_id := trunks.create_shape_owner(trunks)
+	trunks.shape_owner_set_transform(owner_id, Transform3D(Basis.IDENTITY, at - trunks.position + Vector3.UP * 2))
+	trunks.shape_owner_add_shape(owner_id, trunk_shape)
 
 func _drift_mesh(variant: int) -> ArrayMesh:
 	var st := SurfaceTool.new()

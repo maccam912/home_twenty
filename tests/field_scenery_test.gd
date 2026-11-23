@@ -2,6 +2,7 @@ extends SceneTree
 
 const Route = preload("res://world/route.gd")
 const Township = preload("res://world/township.gd")
+const Roadside = preload("res://world/roadside.gd")
 
 var failures := PackedStringArray()
 
@@ -31,19 +32,37 @@ func _run() -> void:
 		var label: String = site.fixture.trim_prefix("the ").to_upper()
 		if not _signed(labels,label,site.stop,2.4) or not _signed(labels,site.name.to_upper(),site.mouth,12):
 			failures.append("Missing fixture or entrance sign at " + site.name)
-	# The four corners and seams with the old Q terrain used to have no ground.
+	# Include the four corners and seams with the old Q terrain.
 	for x: float in [-6398,-4800,-725,-15.05,-14.95,0,14.95,15.05,725,4800,6398]:
 		for z: float in [-6398,-2200.1,-2199.9,199.9,200.1,6398]:
-			var ray := PhysicsRayQueryParameters3D.create(Vector3(x,2,z),Vector3(x,-2,z),2)
-			if space.intersect_ray(ray).is_empty():
-				failures.append("Missing field collision under %s" % Vector2(x,z))
+			_check_ground(space, Vector2(x, z))
+	var low := INF
+	var high := -INF
+	# Cross a swale, then walk a crest deep into a field between the county roads.
+	for x in range(17, 1840, 17):
+		var p := Vector2(x, 1400 + x * .38)
+		var y := _check_ground(space, p)
+		low = minf(low, y)
+		high = maxf(high, y)
+	if high - low < 8.0:
+		failures.append("Missing rolling relief across the open fields")
 	town.free()
 	if failures.is_empty():
-		print("PASS: 28 signed outer driveways and accessible fixtures, and field collision in all four corners")
+		print("PASS: 28 signed outer driveways and accessible fixtures, and rolling field collision (%.1f m of relief)" % (high - low))
 	else:
 		for reason in failures:
 			push_error(reason)
 	quit(int(not failures.is_empty()))
+
+func _check_ground(space: PhysicsDirectSpaceState3D, p: Vector2) -> float:
+	var ray := PhysicsRayQueryParameters3D.create(Vector3(p.x, 40, p.y), Vector3(p.x, -40, p.y), 2)
+	var hit := space.intersect_ray(ray)
+	var grade := Roadside.height_at(p.x, p.y)
+	if hit.is_empty():
+		failures.append("Missing field collision under %s" % p)
+	elif absf(hit.position.y - grade) > .2:
+		failures.append("Field mesh at %s is %.2f m from the wheel contact grade" % [p, hit.position.y - grade])
+	return grade
 
 
 func _signed(labels: Array[Node], text: String, near: Vector2, reach: float) -> bool:

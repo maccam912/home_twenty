@@ -2,7 +2,7 @@ extends SceneTree
 
 const Soundscape := preload("res://audio/soundscape.gd")
 const REQUIRED_CUES := ["wind", "crosswind", "heater", "engine", "plow", "radio_key",
-		"radio_squelch", "horn", "door", "blade_lift", "blade_drop", "ignition", "plat_fold", "shovel"]
+		"radio_squelch", "horn", "door", "blade_lift", "blade_drop", "ignition", "plat_fold"]
 var sound := Soundscape.new()
 var failures := 0
 var checks := 0

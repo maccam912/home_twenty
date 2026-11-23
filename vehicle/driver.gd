@@ -4,25 +4,26 @@ signal horn_used
 signal blade_changed
 signal cab_changed
 signal collapse_recovered
-signal bogged_down
 
 const TruckMesh = preload("res://vehicle/truck_mesh.gd")
 const Route = preload("res://world/route.gd")
+const PlowedSnow = preload("res://world/plowed_snow.gd")
 const Roadside = preload("res://world/roadside.gd")
 const TRUCK_START := Vector3(Route.HOME_PARK.x, 0.0, Route.HOME_PARK.y)
 const WHEELBASE := TruckMesh.REAR_AXLE_Z - TruckMesh.FRONT_AXLE_Z
 const WALK_SPEED := 2.9
 const GRIP_LIMIT := 35.0 * 0.44704
 const ROAD_SPEED := 50.0 * 0.44704
-const BANK_IMPACT_SPEED := 10.0
-const SHOVEL_REACH := 1.75
+const FIELD_SPEED := 2.6
+const FIELD_PLOW_SPEED := 1.8
+const FIELD_REVERSE_SPEED := 2.0
 
 var in_cab := true
 var blade_down := false
 var speed_mps := 0.0
 var cold := 0.0
 var snow_load := 0.0
-var stuck := false
+var offroad_fraction := 0.0
 
 var _truck: CharacterBody3D
 var _walker: CharacterBody3D
@@ -31,8 +32,6 @@ var _model: TruckMesh
 var _camera: Camera3D
 var _cab_view := false
 var _steering := 0.0
-var _in_snowbank := false
-var _packing_snow := false
 var _walk_yaw := 0.0
 var _walk_pitch := 0.0
 var _walk_phase := 0.0
@@ -105,31 +104,14 @@ func set_storm_strength(strength: float) -> void:
 	_model.set_storm_strength(strength)
 
 
-func set_snowbank_contact(in_bank: bool) -> void:
-	# Crawling across a shoulder is safe. Driving into it at speed packs the axles.
-	if in_bank and not _in_snowbank and in_cab and absf(speed_mps) >= BANK_IMPACT_SPEED:
-		_packing_snow = true
-	elif not in_bank:
-		_packing_snow = false
-	_in_snowbank = in_bank
-
-
-func can_dig_out() -> bool:
-	if in_cab or not stuck:
-		return false
-	var local := _truck.to_local(_walker.global_position)
-	var nearest_axle := minf(absf(local.z - TruckMesh.FRONT_AXLE_Z), absf(local.z - TruckMesh.REAR_AXLE_Z))
-	return Vector2(absf(local.x) - TruckMesh.HALF_TRACK, nearest_axle).length_squared() <= SHOVEL_REACH * SHOVEL_REACH
-
-
-func dig_out() -> void:
-	if can_dig_out():
-		stuck = false
-		_packing_snow = false
-
-
-func set_shovel_stroke(phase: float) -> void:
-	_model.set_shovel_stroke(_camera, phase)
+func sample_tires(snow: PlowedSnow) -> void:
+	var offroad_wheels := 0
+	for axle: float in [TruckMesh.FRONT_AXLE_Z, TruckMesh.REAR_AXLE_Z]:
+		for side: float in [-TruckMesh.HALF_TRACK, TruckMesh.HALF_TRACK]:
+			var wheel := _truck.to_global(Vector3(side, 0, axle))
+			if not snow.on_surface(Vector2(wheel.x, wheel.z)):
+				offroad_wheels += 1
+	offroad_fraction = offroad_wheels * 0.25
 
 
 func get_forward() -> Vector3:
@@ -196,30 +178,30 @@ func _drive(delta: float) -> void:
 	var throttle := Input.get_action_strength("accelerate") - Input.get_action_strength("reverse")
 	var steer := Input.get_axis("steer_left", "steer_right")
 	_steering = move_toward(_steering, steer, delta * 4.0)
-	if stuck:
-		return
 	var load := clampf(snow_load, 0.0, 1.0)
 	# Unplowed road snow (0.28 load) still lets a raised blade cruise on Q.
 	var deep_snow := clampf(inverse_lerp(0.28, 1.0, load), 0.0, 1.0)
 	var forward_limit := lerpf(ROAD_SPEED, 6.1, deep_snow)
 	if blade_down:
 		forward_limit = lerpf(9.2, 4.9, load)
-	var target := throttle * (forward_limit if throttle >= 0 else lerpf(5.3, 3.6, load))
-	var acceleration := lerpf(5.3, 2.95, load)
+	# Each tire back on packed ground helps the truck climb out. In powder,
+	# the turned front tires push snow sideways and scrub off pulling speed.
+	var pull := 1.0 - 0.3 * absf(_steering)
+	forward_limit = lerpf(forward_limit, (FIELD_PLOW_SPEED if blade_down else FIELD_SPEED) * pull, offroad_fraction)
+	var reverse_limit := lerpf(lerpf(5.3, 3.6, load), FIELD_REVERSE_SPEED * pull, offroad_fraction)
+	var target := throttle * (forward_limit if throttle >= 0 else reverse_limit)
+	var acceleration := lerpf(lerpf(5.3, 2.95, load), 1.25 * pull, offroad_fraction)
 	var slip := smoothstep(GRIP_LIMIT, ROAD_SPEED, speed_mps)
-	if _packing_snow:
-		target = 0.0
-		acceleration = 38.0
-	elif is_zero_approx(throttle):
+	if is_zero_approx(throttle):
 		acceleration = 2.8 + load * 1.5
 	elif throttle * speed_mps < -0.05:
 		acceleration = lerpf(9.5, 5.0, slip)
 	elif speed_mps > GRIP_LIMIT and speed_mps < target:
 		acceleration *= lerpf(1.0, 0.45, slip)
+	# Loose snow catches a fast truck over a few metres, even with the gas held.
+	if absf(speed_mps) > (forward_limit if speed_mps > 0 else reverse_limit):
+		acceleration = maxf(acceleration, 23.0 * offroad_fraction)
 	speed_mps = move_toward(speed_mps, target, acceleration * delta)
-	if _packing_snow and is_zero_approx(speed_mps):
-		_settle_in_bank()
-		return
 	var angle := _steering * lerpf(0.58, 0.31, clampf(absf(speed_mps) / 14.0, 0, 1))
 	angle *= lerpf(1.0, 0.28, slip)
 	var turn_rate := -speed_mps * tan(angle) / WHEELBASE
@@ -238,14 +220,6 @@ func _drive(delta: float) -> void:
 		_truck.velocity = _truck.get_real_velocity().slide(Vector3.UP)
 		speed_mps = _truck.velocity.dot(forward)
 	_ground_truck(forward)
-
-
-func _settle_in_bank() -> void:
-	speed_mps = 0.0
-	_truck.velocity = Vector3.ZERO
-	_packing_snow = false
-	stuck = true
-	bogged_down.emit()
 
 
 func _ground_height(at: Vector3) -> float:
@@ -302,8 +276,6 @@ func _leave_truck() -> void:
 		in_cab = false
 		speed_mps = 0.0
 		_truck.velocity = Vector3.ZERO
-		if _packing_snow:
-			_settle_in_bank()
 		_steering = 0.0
 		_place_camera(0.0, true)
 		cab_changed.emit()
