@@ -20,6 +20,18 @@ func settle() -> void:
 	for frame in 90:
 		sound._process(1.0 / 60.0)
 
+func cue_rms_db(cue: String) -> float:
+	var player := sound.get_node(NodePath(cue)) as AudioStreamPlayer
+	var playback := player.stream.instantiate_playback()
+	playback.start()
+	var frames := int(player.stream.get_length() * AudioServer.get_mix_rate())
+	var samples := playback.mix_audio(1.0, frames)
+	playback.stop()
+	var sum_squares := 0.0
+	for frame in samples:
+		sum_squares += frame.length_squared()
+	return linear_to_db(sqrt(sum_squares / (2.0 * samples.size()))) + player.volume_db
+
 func _run() -> void:
 	var initial_bus_count := AudioServer.bus_count
 	root.add_child(sound)
@@ -32,6 +44,9 @@ func _run() -> void:
 		expect(not player.playing, "Title should be quiet: %s" % cue)
 		expect(player.stream.loop == (cue in Soundscape.LOOPS), "Loop flag: %s" % cue)
 	if failures == 0:
+		var key_db := cue_rms_db("radio_key")
+		expect(absf(key_db - cue_rms_db("radio_squelch")) < 6.0, "CB press and release have comparable levels")
+		expect(cue_rms_db("horn") - key_db < 15.0, "Horn stays within 15 dB of the mic switch")
 		await _check_mix()
 	sound.shutdown()
 	expect(AudioServer.bus_count == initial_bus_count, "Storm bus removed at shutdown")

@@ -9,6 +9,7 @@ const BECK_PORCH := Vector2(43,-30)
 const HOME_PORCH := Vector2(-12,38)
 const PORCH_REACH := 3.7
 const FULL_LANE := 36
+const PICTURE_LINES := 320.0
 var town: Township
 var driver
 var snow
@@ -33,6 +34,8 @@ var previous_mouse_mode := Input.MOUSE_MODE_VISIBLE
 func _ready() -> void:
 	get_tree().auto_accept_quit = false
 	process_mode = Node.PROCESS_MODE_ALWAYS
+	get_viewport().size_changed.connect(_size_picture)
+	_size_picture()
 	town = Township.new()
 	town.name = "Township"
 	add_child(town)
@@ -73,6 +76,13 @@ func _ready() -> void:
 	title_camera.look_at(Vector3(2.25,1.36,45.0))
 	title_camera.make_current()
 	_show_menu("title")
+
+func _size_picture() -> void:
+	# The road stays at TV resolution while the map and subtitles use the full canvas.
+	var viewport := get_viewport()
+	var line_pitch := maxf(1.0, get_window().size.y / PICTURE_LINES)
+	viewport.scaling_3d_scale = 1.0 / line_pitch
+	$Display/CRT.material.set_shader_parameter("line_pitch", line_pitch)
 
 func _show_menu(next: String) -> void:
 	if mode=="drive":

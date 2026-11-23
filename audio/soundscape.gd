@@ -5,13 +5,15 @@ extends Node
 
 const AUDIO_DIRECTORY := "res://audio/generated/"
 const LOOPS := ["wind", "crosswind", "heater", "engine", "plow"]
+# Playback gain for each recording in dB. The horn leads the mechanical cues;
+# the CB click and squelch sit closer to the cab ambience.
 const ONE_SHOT_LEVELS := {
-	"radio_key": -13.0,
+	"radio_key": -6.0,
 	"radio_squelch": -17.0,
-	"horn": -9.0,
-	"door": -9.0,
-	"blade_lift": -4.5,
-	"blade_drop": -7.0,
+	"horn": -15.0,
+	"door": -5.0,
+	"blade_lift": -8.0,
+	"blade_drop": -6.0,
 	"tow_chain": -11.0,
 	"mailbox": -10.0,
 }
@@ -104,22 +106,24 @@ func _process(delta: float) -> void:
 	var blend := 1.0 - exp(-delta * 5.0)
 	var drift := smoothstep(0.15, 0.9, _gust)
 	_wind_filter.cutoff_hz = lerpf(_wind_filter.cutoff_hz, 1150.0 if _in_cab else 16000.0, blend)
-	# The close blowing-snow recording is 26 LU louder than the open-field wind.
-	_mix("wind", 0.15 if _in_cab else lerpf(0.37, 0.82, drift), blend)
-	_mix("crosswind", lerpf(0.006, 0.066, drift) if _in_cab else lerpf(0.018, 0.25, drift), blend)
-	# The recorded fan is much softer than the motor. Preserve its presence in the parked cab.
-	_mix("heater", 0.85 if _in_cab else 0.0, blend)
-	_mix("engine", (0.12 + 0.11 * _speed) if _in_cab else 0.04, blend)
-	_mix("plow", (0.24 + 0.23 * _speed) if _working else 0.0, blend)
+	# The gust recording measures 26 LU louder than the open-field wind.
+	var wind_db := lerpf(-9.0, -6.0, drift) if _in_cab else lerpf(-2.5, 0.5, drift)
+	var gust_db := lerpf(-45.0, -27.0, drift) if _in_cab else lerpf(-34.0, -16.0, drift)
+	_mix("wind", wind_db, blend)
+	_mix("crosswind", gust_db, blend)
+	# Lift the quiet fan into the idle mix and let the scrape take the lead under load.
+	_mix("heater", 6.0 if _in_cab else -INF, blend)
+	_mix("engine", lerpf(-17.0, -13.0, _speed) if _in_cab else -27.0, blend)
+	_mix("plow", lerpf(-11.0, -8.5, _speed) if _working else -INF, blend)
 	var engine := _players.get("engine") as AudioStreamPlayer
 	if engine:
 		engine.pitch_scale = lerpf(engine.pitch_scale, 0.92 + 0.45 * _speed, blend)
 
 
-func _mix(cue: String, target: float, blend: float) -> void:
+func _mix(cue: String, target_db: float, blend: float) -> void:
 	var player := _players.get(cue) as AudioStreamPlayer
 	if player:
-		var level := lerpf(float(_levels[cue]), target, blend)
+		var level := lerpf(float(_levels[cue]), db_to_linear(target_db), blend)
 		_levels[cue] = level
 		player.volume_db = linear_to_db(maxf(level, 0.0001))
 
